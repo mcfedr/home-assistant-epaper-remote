@@ -1,0 +1,102 @@
+#include "config_remote.h"
+#include "assets/icons.h"
+#include "boards.h"
+#include "config.h"
+#include "screen.h"
+#include "store.h"
+
+void configure_remote(Configuration* config, EntityStore* store, Screen* screen) {
+    // Configure wifi
+    config->wifi_ssid = "MyWifiSSID";
+    config->wifi_password = "my-wifi-password1234!";
+
+    // Configure home assistant
+    // If you're using https, use wss://, otherwise use ws://
+    config->home_assistant_url = "ws://192.168.0.1/api/websocket";
+    config->home_assistant_token = "ey...";
+    config->root_ca = ISRG_ROOT_X1; // You probably don't need to update this
+
+    // Declare home assistant entities
+    EntityConfig living_room_lights = {
+        .entity_id = "light.silicon_labs_ezsp_lampes_salon",
+        .command_type = CommandType::SetLightBrightnessPercentage,
+    };
+    EntityConfig bedroom_lights = {
+        .entity_id = "light.silicon_labs_ezsp_lampes_chambre",
+        .command_type = CommandType::SetLightBrightnessPercentage,
+    };
+    EntityConfig air_purifier = {
+        .entity_id = "fan.ikea_of_sweden_starkvind_air_purifier_fan",
+        .command_type = CommandType::SetFanSpeedPercentage,
+    };
+    EntityConfig pc_lights = {
+        .entity_id = "switch.lampe_pc_switch",
+        .command_type = CommandType::SwitchOnOff,
+    };
+    EntityConfig night_lights = EntityConfig{
+        .entity_id = "automation.lumiere_nuit",
+        .command_type = CommandType::AutomationOnOff,
+    };
+
+    // Add widgets
+    screen_add_slider(
+        SliderConfig{
+            .entity_ref = store_add_entity(store, living_room_lights),
+            .label = "Living room",
+            .icon_on = lightbulb_outline,
+            .icon_off = lightbulb_off_outline,
+            .pos_x = 30,
+            .pos_y = 30,
+            .width = DISPLAY_WIDTH - 60,
+            .height = 170,
+        },
+        screen);
+
+    screen_add_slider(
+        SliderConfig{
+            .entity_ref = store_add_entity(store, bedroom_lights),
+            .label = "Bedroom",
+            .icon_on = lightbulb_outline,
+            .icon_off = lightbulb_off_outline,
+            .pos_x = 30,
+            .pos_y = 240,
+            .width = DISPLAY_WIDTH - 60,
+            .height = 170,
+        },
+        screen);
+
+    screen_add_slider(
+        SliderConfig{
+            .entity_ref = store_add_entity(store, air_purifier),
+            .label = "Air purifier",
+            .icon_on = fan,
+            .icon_off = fan_off,
+            .pos_x = 30,
+            .pos_y = 450,
+            .width = DISPLAY_WIDTH - 60,
+            .height = 170,
+        },
+        screen);
+
+    screen_add_button(
+        ButtonConfig{
+            .entity_ref = store_add_entity(store, pc_lights),
+            .label = "PC",
+            .icon_on = lightbulb_outline,
+            .icon_off = lightbulb_off_outline,
+            .pos_x = 30,
+            .pos_y = 660,
+        },
+        screen);
+
+    screen_add_button(
+        ButtonConfig{
+            .entity_ref = store_add_entity(store, night_lights),
+            .label = "Night lights",
+            .icon_on = robot_outline,
+            .icon_off = robot_off_outline,
+            .pos_x = 30,
+            .pos_y = 800,
+        },
+        screen);
+}

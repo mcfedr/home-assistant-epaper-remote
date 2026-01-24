@@ -1,0 +1,5 @@
+.pio
+.vscode
+sdkconfig.*
+src/config_remote.cpp
+src/assets/icons.h
