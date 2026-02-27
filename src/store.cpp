@@ -1,4 +1,5 @@
 #include "store.h"
+#include "climate_value.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include <cctype>
@@ -286,7 +287,7 @@ void store_finish_room_sync(EntityStore* store) {
     notify_ui(store);
 }
 
-int8_t store_add_floor(EntityStore* store, const char* floor_name) {
+int8_t store_add_floor(EntityStore* store, const char* floor_name, const char* icon_name) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
 
     if (store->floor_count >= MAX_FLOORS) {
@@ -298,12 +299,13 @@ int8_t store_add_floor(EntityStore* store, const char* floor_name) {
     Floor& floor = store->floors[idx];
     memset(&floor, 0, sizeof(Floor));
     copy_string(floor.name, sizeof(floor.name), floor_name);
+    copy_string(floor.icon, sizeof(floor.icon), icon_name);
 
     xSemaphoreGive(store->mutex);
     return static_cast<int8_t>(idx);
 }
 
-int8_t store_add_room(EntityStore* store, const char* room_name, int8_t floor_idx) {
+int8_t store_add_room(EntityStore* store, const char* room_name, const char* icon_name, int8_t floor_idx) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
 
     if (floor_idx < 0 || floor_idx >= static_cast<int8_t>(store->floor_count)) {
@@ -320,6 +322,7 @@ int8_t store_add_room(EntityStore* store, const char* room_name, int8_t floor_id
     Room& room = store->rooms[idx];
     memset(&room, 0, sizeof(Room));
     copy_string(room.name, sizeof(room.name), room_name);
+    copy_string(room.icon, sizeof(room.icon), icon_name);
     room.floor_idx = floor_idx;
 
     xSemaphoreGive(store->mutex);
@@ -368,6 +371,10 @@ int8_t store_add_entity_to_room(EntityStore* store, uint8_t room_idx, EntityConf
             fallback_entity_name(entity.entity_id, new_entity.display_name, sizeof(new_entity.display_name));
         }
         new_entity.command_type = entity.command_type;
+        if (new_entity.command_type == CommandType::SetClimateModeAndTemperature) {
+            new_entity.climate_mode_mask = CLIMATE_MODE_MASK_DEFAULT;
+            new_entity.current_value = climate_pack_value(ClimateMode::Off, climate_celsius_to_steps(20.0f));
+        }
     } else if (display_name && display_name[0]) {
         char trimmed_name[MAX_ENTITY_NAME_LEN];
         trim_entity_name_for_room(display_name, room_name, trimmed_name, sizeof(trimmed_name));
@@ -506,6 +513,7 @@ void store_get_floor_list_snapshot(EntityStore* store, FloorListSnapshot* snapsh
     snapshot->floor_count = store->floor_count;
     for (uint8_t floor_idx = 0; floor_idx < store->floor_count; floor_idx++) {
         copy_string(snapshot->floor_names[floor_idx], MAX_FLOOR_NAME_LEN, store->floors[floor_idx].name);
+        copy_string(snapshot->floor_icons[floor_idx], MAX_ICON_NAME_LEN, store->floors[floor_idx].icon);
     }
     xSemaphoreGive(store->mutex);
 }
@@ -528,6 +536,7 @@ bool store_get_room_list_snapshot(EntityStore* store, int8_t floor_idx, RoomList
         uint8_t snapshot_idx = snapshot->room_count++;
         snapshot->room_indices[snapshot_idx] = static_cast<int8_t>(room_idx);
         copy_string(snapshot->room_names[snapshot_idx], MAX_ROOM_NAME_LEN, store->rooms[room_idx].name);
+        copy_string(snapshot->room_icons[snapshot_idx], MAX_ICON_NAME_LEN, store->rooms[room_idx].icon);
     }
     xSemaphoreGive(store->mutex);
     return true;
@@ -550,10 +559,31 @@ bool store_get_room_controls_snapshot(EntityStore* store, int8_t room_idx, RoomC
         snapshot->truncated = true;
     }
 
-    for (uint8_t i = 0; i < snapshot->entity_count; i++) {
+    uint8_t snapshot_idx = 0;
+    auto append_entity_to_snapshot = [&](uint8_t entity_idx) {
+        if (snapshot_idx >= snapshot->entity_count) {
+            return;
+        }
+
+        snapshot->entity_ids[snapshot_idx] = entity_idx;
+        snapshot->entity_types[snapshot_idx] = store->entities[entity_idx].command_type;
+        snapshot->entity_climate_mode_masks[snapshot_idx] = store->entities[entity_idx].climate_mode_mask;
+        copy_string(snapshot->entity_names[snapshot_idx], MAX_ENTITY_NAME_LEN, store->entities[entity_idx].display_name);
+        snapshot_idx++;
+    };
+
+    // Always place climate widgets first in the room controls list.
+    for (uint8_t i = 0; i < room.entity_count && snapshot_idx < snapshot->entity_count; i++) {
         uint8_t entity_idx = room.entity_ids[i];
-        snapshot->entity_ids[i] = entity_idx;
-        copy_string(snapshot->entity_names[i], MAX_ENTITY_NAME_LEN, store->entities[entity_idx].display_name);
+        if (store->entities[entity_idx].command_type == CommandType::SetClimateModeAndTemperature) {
+            append_entity_to_snapshot(entity_idx);
+        }
+    }
+    for (uint8_t i = 0; i < room.entity_count && snapshot_idx < snapshot->entity_count; i++) {
+        uint8_t entity_idx = room.entity_ids[i];
+        if (store->entities[entity_idx].command_type != CommandType::SetClimateModeAndTemperature) {
+            append_entity_to_snapshot(entity_idx);
+        }
     }
 
     xSemaphoreGive(store->mutex);
@@ -605,6 +635,13 @@ void store_update_ui_state(EntityStore* store, const Screen* screen, UIState* ui
     xSemaphoreGive(store->mutex);
 }
 
+void store_bump_rooms_revision(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    store->rooms_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+}
+
 void store_wait_for_wifi_up(EntityStore* store) {
     xEventGroupWaitBits(store->event_group, BIT_WIFI_UP, pdFALSE, pdTRUE, portMAX_DELAY);
 }
@@ -631,6 +668,10 @@ EntityRef store_add_entity(EntityStore* store, EntityConfig entity) {
     copy_string(new_entity.entity_id, sizeof(new_entity.entity_id), entity.entity_id);
     fallback_entity_name(entity.entity_id, new_entity.display_name, sizeof(new_entity.display_name));
     new_entity.command_type = entity.command_type;
+    if (new_entity.command_type == CommandType::SetClimateModeAndTemperature) {
+        new_entity.climate_mode_mask = CLIMATE_MODE_MASK_DEFAULT;
+        new_entity.current_value = climate_pack_value(ClimateMode::Off, climate_celsius_to_steps(20.0f));
+    }
 
     xSemaphoreGive(store->mutex);
     return EntityRef{.index = entity_id};

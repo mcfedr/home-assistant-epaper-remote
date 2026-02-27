@@ -35,6 +35,7 @@ constexpr size_t MAX_FLOORS = 16;
 constexpr size_t MAX_ROOMS = 32;
 constexpr size_t MAX_ENTITY_ID_LEN = 96;
 constexpr size_t MAX_ENTITY_NAME_LEN = 40;
+constexpr size_t MAX_ICON_NAME_LEN = 64;
 constexpr size_t MAX_FLOOR_NAME_LEN = 40;
 constexpr size_t MAX_ROOM_NAME_LEN = 40;
 constexpr uint32_t TOUCH_RELEASE_TIMEOUT_MS = 50;
@@ -54,11 +55,18 @@ constexpr uint16_t ROOM_LIST_GRID_GAP_X = 16;
 constexpr uint16_t ROOM_LIST_GRID_GAP_Y = 16;
 constexpr uint16_t ROOM_LIST_FOOTER_Y = 920;
 constexpr uint16_t ROOM_LIST_SWIPE_THRESHOLD_X = 80;
+constexpr uint16_t ROOM_LIST_TILE_ICON_SIZE = 64;
+constexpr uint16_t ROOM_LIST_TILE_ICON_TOP_PADDING = 10;
+constexpr uint16_t ROOM_LIST_TILE_ICON_LABEL_GAP = 10;
+constexpr uint16_t ROOM_LIST_TILE_LABEL_BOTTOM_PADDING = 8;
 
 // Room controls UI geometry
 constexpr uint16_t ROOM_CONTROLS_HEADER_HEIGHT = 110;
 constexpr uint16_t ROOM_CONTROLS_ITEM_START_Y = 130;
-constexpr uint16_t ROOM_CONTROLS_ITEM_SPACING = 120;
+constexpr uint16_t ROOM_CONTROLS_LIGHT_HEIGHT = BUTTON_SIZE + 50;
+constexpr uint16_t ROOM_CONTROLS_CLIMATE_HEIGHT = BUTTON_SIZE * 2 + 40;
+constexpr uint16_t ROOM_CONTROLS_ITEM_GAP = 20;
+constexpr uint16_t ROOM_CONTROLS_LIGHT_COLUMN_GAP = 20;
 constexpr uint16_t ROOM_CONTROLS_ITEM_X = 30;
 constexpr uint16_t ROOM_CONTROLS_BACK_X = 20;
 constexpr uint16_t ROOM_CONTROLS_BACK_Y = 25;

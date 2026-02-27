@@ -1,8 +1,11 @@
 #include "widgets/OnOffButton.h"
+#include "assets/Montserrat_Regular_16.h"
+#include "assets/Montserrat_Regular_20.h"
 #include "assets/Montserrat_Regular_26.h"
 #include "assets/icons.h"
 #include "constants.h"
 #include <FastEPD.h>
+#include <algorithm>
 #include <cstring>
 
 static void set_label_font(FASTEPD* display, uint8_t font_idx) {
@@ -11,13 +14,13 @@ static void set_label_font(FASTEPD* display, uint8_t font_idx) {
         display->setFont(Montserrat_Regular_26);
         break;
     case 1:
-        display->setFont(FONT_16x16);
+        display->setFont(Montserrat_Regular_20);
         break;
     case 2:
-        display->setFont(FONT_12x16);
+        display->setFont(Montserrat_Regular_16);
         break;
     default:
-        display->setFont(FONT_8x8);
+        display->setFont(Montserrat_Regular_16);
         break;
     }
 }
@@ -80,65 +83,107 @@ OnOffButton::OnOffButton(const char* label, const uint8_t* on_icon, const uint8_
     strncpy(label_, label ? label : "", sizeof(label_) - 1);
     label_[sizeof(label_) - 1] = '\0';
 
-    uint8_t icon_pos = (BUTTON_SIZE - BUTTON_ICON_SIZE) / 2;
-    on_sprite_4bpp.initSprite(BUTTON_SIZE + 2, BUTTON_SIZE + 2);
+    if (rect_.w == 0) {
+        rect_.w = BUTTON_SIZE;
+    }
+    if (rect_.h == 0) {
+        rect_.h = BUTTON_SIZE;
+    }
+
+    constexpr int16_t pad_x = 8;
+    constexpr int16_t pad_top = 6;
+    constexpr int16_t label_gap = 8;
+    constexpr int16_t label_h = 30;
+    constexpr int16_t bottom_pad = 6;
+
+    const int16_t max_icon_w = std::max<int16_t>(BUTTON_ICON_SIZE + 6, static_cast<int16_t>(rect_.w) - 2 * pad_x);
+    const int16_t max_icon_h =
+        std::max<int16_t>(BUTTON_ICON_SIZE + 6, static_cast<int16_t>(rect_.h) - (pad_top + label_gap + label_h + bottom_pad));
+    sprite_size_ = static_cast<uint16_t>(std::min(max_icon_w, max_icon_h));
+
+    icon_rect_ = Rect{
+        .x = static_cast<uint16_t>(rect_.x + (rect_.w - sprite_size_) / 2),
+        .y = static_cast<uint16_t>(rect_.y + pad_top),
+        .w = sprite_size_,
+        .h = sprite_size_,
+    };
+
+    const uint16_t label_y = static_cast<uint16_t>(icon_rect_.y + icon_rect_.h + label_gap);
+    uint16_t label_h_actual = static_cast<uint16_t>(rect_.y + rect_.h > label_y + bottom_pad ? rect_.y + rect_.h - label_y - bottom_pad : label_h);
+    if (label_h_actual < 10) {
+        label_h_actual = 10;
+    }
+    label_rect_ = Rect{
+        .x = static_cast<uint16_t>(rect_.x + 4),
+        .y = label_y,
+        .w = static_cast<uint16_t>(rect_.w > 8 ? rect_.w - 8 : rect_.w),
+        .h = label_h_actual,
+    };
+
+    const uint16_t icon_center = sprite_size_ / 2;
+    const uint16_t icon_radius = sprite_size_ / 2;
+    const uint16_t icon_pos = static_cast<uint16_t>((sprite_size_ - BUTTON_ICON_SIZE) / 2);
+
+    on_sprite_4bpp.initSprite(sprite_size_, sprite_size_);
     on_sprite_4bpp.setMode(BB_MODE_4BPP);
     on_sprite_4bpp.fillScreen(0xf);
-    on_sprite_4bpp.fillCircle(BUTTON_SIZE / 2, BUTTON_SIZE / 2, BUTTON_SIZE / 2, BBEP_BLACK);
+    on_sprite_4bpp.fillCircle(icon_center, icon_center, icon_radius, BBEP_BLACK);
     on_sprite_4bpp.loadBMP(on_icon, icon_pos, icon_pos, BBEP_BLACK, 0xf);
 
-    off_sprite_4bpp.initSprite(BUTTON_SIZE + 2, BUTTON_SIZE + 2);
+    off_sprite_4bpp.initSprite(sprite_size_, sprite_size_);
     off_sprite_4bpp.setMode(BB_MODE_4BPP);
     off_sprite_4bpp.fillScreen(0xf);
-    off_sprite_4bpp.fillCircle(BUTTON_SIZE / 2, BUTTON_SIZE / 2, BUTTON_SIZE / 2, BBEP_BLACK);
-    off_sprite_4bpp.fillCircle(BUTTON_SIZE / 2, BUTTON_SIZE / 2, BUTTON_SIZE / 2 - BUTTON_BORDER_SIZE, 0xf);
+    off_sprite_4bpp.fillCircle(icon_center, icon_center, icon_radius, BBEP_BLACK);
+    off_sprite_4bpp.fillCircle(icon_center, icon_center, icon_radius - BUTTON_BORDER_SIZE, 0xf);
     off_sprite_4bpp.loadBMP(off_icon, icon_pos, icon_pos, 0xf, BBEP_BLACK);
 
-    on_sprite_1bpp.initSprite(BUTTON_SIZE + 2, BUTTON_SIZE + 2);
+    on_sprite_1bpp.initSprite(sprite_size_, sprite_size_);
     on_sprite_1bpp.setMode(BB_MODE_1BPP);
     on_sprite_1bpp.fillScreen(BBEP_WHITE);
-    on_sprite_1bpp.fillCircle(BUTTON_SIZE / 2, BUTTON_SIZE / 2, BUTTON_SIZE / 2, BBEP_BLACK);
+    on_sprite_1bpp.fillCircle(icon_center, icon_center, icon_radius, BBEP_BLACK);
     on_sprite_1bpp.loadBMP(on_icon, icon_pos, icon_pos, BBEP_BLACK, BBEP_WHITE);
 
-    off_sprite_1bpp.initSprite(BUTTON_SIZE + 2, BUTTON_SIZE + 2);
+    off_sprite_1bpp.initSprite(sprite_size_, sprite_size_);
     off_sprite_1bpp.setMode(BB_MODE_1BPP);
     off_sprite_1bpp.fillScreen(BBEP_WHITE);
-    off_sprite_1bpp.fillCircle(BUTTON_SIZE / 2, BUTTON_SIZE / 2, BUTTON_SIZE / 2, BBEP_BLACK);
-    off_sprite_1bpp.fillCircle(BUTTON_SIZE / 2, BUTTON_SIZE / 2, BUTTON_SIZE / 2 - BUTTON_BORDER_SIZE, BBEP_WHITE);
+    off_sprite_1bpp.fillCircle(icon_center, icon_center, icon_radius, BBEP_BLACK);
+    off_sprite_1bpp.fillCircle(icon_center, icon_center, icon_radius - BUTTON_BORDER_SIZE, BBEP_WHITE);
     off_sprite_1bpp.loadBMP(off_icon, icon_pos, icon_pos, BBEP_WHITE, BBEP_BLACK);
 
     // Compute the hit box
     const int x_min = static_cast<int>(rect_.x) - TOUCH_AREA_MARGIN;
     const int y_min = static_cast<int>(rect_.y) - TOUCH_AREA_MARGIN;
-    hit_rect_ =
-        Rect{static_cast<uint16_t>(x_min < 0 ? 0 : x_min), static_cast<uint16_t>(y_min < 0 ? 0 : y_min),
-             static_cast<uint16_t>(BUTTON_SIZE + 2 * TOUCH_AREA_MARGIN), static_cast<uint16_t>(BUTTON_SIZE + 2 * TOUCH_AREA_MARGIN)};
+    hit_rect_ = Rect{
+        static_cast<uint16_t>(x_min < 0 ? 0 : x_min),
+        static_cast<uint16_t>(y_min < 0 ? 0 : y_min),
+        static_cast<uint16_t>(rect_.w + 2 * TOUCH_AREA_MARGIN),
+        static_cast<uint16_t>(rect_.h + 2 * TOUCH_AREA_MARGIN),
+    };
 }
 
 Rect OnOffButton::partialDraw(FASTEPD* display, BitDepth depth, uint8_t from, uint8_t to) {
     if (to) {
         if (depth == BitDepth::BD_4BPP) {
-            display->drawSprite(&on_sprite_4bpp, rect_.x, rect_.y);
+            display->drawSprite(&on_sprite_4bpp, icon_rect_.x, icon_rect_.y);
         } else {
-            display->drawSprite(&on_sprite_1bpp, rect_.x, rect_.y);
+            display->drawSprite(&on_sprite_1bpp, icon_rect_.x, icon_rect_.y);
         }
     } else {
         if (depth == BitDepth::BD_4BPP) {
-            display->drawSprite(&off_sprite_4bpp, rect_.x, rect_.y);
+            display->drawSprite(&off_sprite_4bpp, icon_rect_.x, icon_rect_.y);
         } else {
-            display->drawSprite(&off_sprite_1bpp, rect_.x, rect_.y);
+            display->drawSprite(&off_sprite_1bpp, icon_rect_.x, icon_rect_.y);
         }
     }
 
-    return Rect{rect_.x, rect_.y, BUTTON_SIZE + 1, BUTTON_SIZE + 1};
+    return Rect{icon_rect_.x, icon_rect_.y, icon_rect_.w, icon_rect_.h};
 }
 
 void OnOffButton::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
     partialDraw(display, depth, 0, value);
 
-    // Fit the light label in the remaining row width.
-    const int16_t text_x = rect_.x + BUTTON_SIZE + 30;
-    const int16_t max_w = static_cast<int16_t>(display->width()) - text_x - 8;
+    // Fit the label in one centered line below the icon.
+    const int16_t max_w = static_cast<int16_t>(label_rect_.w);
     char draw_label[MAX_ENTITY_NAME_LEN];
     copy_text(draw_label, sizeof(draw_label), label_);
 
@@ -155,8 +200,10 @@ void OnOffButton::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
     set_label_font(display, font_idx);
     truncate_with_ellipsis(display, draw_label, sizeof(draw_label), max_w);
     display->setTextColor(BBEP_BLACK);
-    BB_RECT line_rect = get_text_box(display, "pI");
-    display->setCursor(text_x, rect_.y + (BUTTON_SIZE + line_rect.h) / 2 - 5);
+    BB_RECT text_rect = get_text_box(display, draw_label);
+    int16_t text_x = static_cast<int16_t>(label_rect_.x) + static_cast<int16_t>(label_rect_.w - text_rect.w) / 2;
+    int16_t text_y = static_cast<int16_t>(label_rect_.y) + static_cast<int16_t>(label_rect_.h + text_rect.h) / 2 - 2;
+    display->setCursor(text_x, text_y);
     display->write(draw_label);
 }
 

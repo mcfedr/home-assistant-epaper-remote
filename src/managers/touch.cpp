@@ -76,8 +76,8 @@ void touch_task(void* arg) {
     TouchEvent touch_event = TouchEvent{};
     TouchEvent room_list_touch_start = TouchEvent{};
     TouchEvent room_list_touch_end = TouchEvent{};
-    FloorListSnapshot floor_list_snapshot = {};
-    RoomListSnapshot room_list_snapshot = {};
+    static FloorListSnapshot floor_list_snapshot = {};
+    static RoomListSnapshot room_list_snapshot = {};
     bool touching = false;
     int active_widget = -1;
     uint32_t last_touch_ms = 0;

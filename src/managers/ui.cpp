@@ -1,4 +1,6 @@
 #include "ui.h"
+#include "assets/Montserrat_Regular_16.h"
+#include "assets/Montserrat_Regular_20.h"
 #include "assets/Montserrat_Regular_26.h"
 #include "assets/icons.h"
 #include "boards.h"
@@ -17,6 +19,79 @@ static const char* const TEXT_WIFI_DISCONNECTED[] = {"Not connected", "to Wifi",
 static const char* const TEXT_HASS_DISCONNECTED[] = {"Not connected", "to Home Assistant", nullptr};
 static const char* const TEXT_HASS_INVALID_KEY[] = {"Cannot connect", "to Home Assistant:", "invalid token", nullptr};
 static const char* const TEXT_GENERIC_ERROR[] = {"Unknown error", nullptr};
+
+static const char* strip_mdi_prefix(const char* icon_name) {
+    if (!icon_name) {
+        return nullptr;
+    }
+    if (strncmp(icon_name, "mdi:", 4) == 0) {
+        return icon_name + 4;
+    }
+    return icon_name;
+}
+
+static const uint8_t* ui_icon_for_ha_icon(const char* icon_name) {
+    const char* mdi_name = strip_mdi_prefix(icon_name);
+    if (!mdi_name || mdi_name[0] == '\0') {
+        return nullptr;
+    }
+
+    if (strcmp(mdi_name, "account-cowboy-hat") == 0) {
+        return account_cowboy_hat;
+    }
+    if (strcmp(mdi_name, "bathtub-outline") == 0 || strcmp(mdi_name, "bathtub") == 0) {
+        return bathtub_outline;
+    }
+    if (strcmp(mdi_name, "bed") == 0 || strcmp(mdi_name, "bed-outline") == 0) {
+        return bed;
+    }
+    if (strcmp(mdi_name, "countertop") == 0) {
+        return countertop;
+    }
+    if (strcmp(mdi_name, "cradle") == 0) {
+        return cradle;
+    }
+    if (strcmp(mdi_name, "door") == 0 || strcmp(mdi_name, "door-open") == 0) {
+        return door;
+    }
+    if (strcmp(mdi_name, "garage") == 0) {
+        return garage;
+    }
+    if (strcmp(mdi_name, "office-building") == 0 || strcmp(mdi_name, "office-building-outline") == 0) {
+        return office_building;
+    }
+    if (strcmp(mdi_name, "shower-head") == 0 || strcmp(mdi_name, "shower") == 0) {
+        return shower_head;
+    }
+    if (strcmp(mdi_name, "sofa") == 0) {
+        return sofa;
+    }
+    if (strcmp(mdi_name, "stairs-up") == 0 || strcmp(mdi_name, "stairs") == 0) {
+        return stairs_up;
+    }
+    if (strcmp(mdi_name, "walk") == 0 || strcmp(mdi_name, "walking") == 0) {
+        return walk;
+    }
+
+    return home_outline;
+}
+
+static bool ui_draw_room_tile_icon(FASTEPD* epaper, int16_t tile_x, int16_t tile_y, int16_t tile_w, int16_t tile_h, const char* icon_name) {
+    const uint8_t* icon = ui_icon_for_ha_icon(icon_name);
+    if (!icon) {
+        return false;
+    }
+
+    const int16_t reserved_height = ROOM_LIST_TILE_ICON_TOP_PADDING + ROOM_LIST_TILE_ICON_SIZE + ROOM_LIST_TILE_ICON_LABEL_GAP;
+    if (reserved_height >= tile_h) {
+        return false;
+    }
+
+    const int16_t icon_x = tile_x + (tile_w - ROOM_LIST_TILE_ICON_SIZE) / 2;
+    const int16_t icon_y = tile_y + ROOM_LIST_TILE_ICON_TOP_PADDING;
+    epaper->loadBMP(icon, icon_x, icon_y, 0xf, BBEP_BLACK);
+    return true;
+}
 
 void accumulate_damage(Rect& acc, const Rect& r) {
     if (r.w <= 0 || r.h <= 0) {
@@ -79,10 +154,10 @@ static void set_room_list_font(FASTEPD* epaper, uint8_t font_idx) {
         epaper->setFont(Montserrat_Regular_26);
         break;
     case 1:
-        epaper->setFont(FONT_16x16);
+        epaper->setFont(Montserrat_Regular_20);
         break;
     default:
-        epaper->setFont(FONT_12x16);
+        epaper->setFont(Montserrat_Regular_16);
         break;
     }
 }
@@ -205,11 +280,14 @@ static void truncate_with_ellipsis(FASTEPD* epaper, char* line, size_t line_len,
     line[line_len - 1] = '\0';
 }
 
-static void ui_draw_room_tile_label(FASTEPD* epaper, int16_t tile_x, int16_t tile_y, int16_t tile_w, int16_t tile_h, const char* name) {
+static void ui_draw_room_tile_label(FASTEPD* epaper, int16_t label_x, int16_t label_y, int16_t label_w, int16_t label_h, const char* name) {
     constexpr int16_t pad_x = 12;
-    constexpr int16_t pad_y = 10;
-    const int16_t max_w = tile_w - pad_x * 2;
-    const int16_t max_h = tile_h - pad_y * 2;
+    constexpr int16_t pad_y = 6;
+    const int16_t max_w = label_w - pad_x * 2;
+    const int16_t max_h = label_h - pad_y * 2;
+    if (max_w <= 0 || max_h <= 0) {
+        return;
+    }
 
     char line1[64];
     char line2[64];
@@ -248,12 +326,12 @@ static void ui_draw_room_tile_label(FASTEPD* epaper, int16_t tile_x, int16_t til
     const bool two_lines = line2[0] != '\0';
     const int16_t gap = font_idx == 0 ? 10 : 4;
     const int16_t total_h = two_lines ? static_cast<int16_t>(rect1.h + rect2.h + gap) : rect1.h;
-    const int16_t top = tile_y + (tile_h - total_h) / 2;
-    epaper->setCursor(tile_x + (tile_w - rect1.w) / 2, top);
+    const int16_t top = label_y + (label_h - total_h) / 2;
+    epaper->setCursor(label_x + (label_w - rect1.w) / 2, top);
     epaper->write(line1);
 
     if (two_lines) {
-        epaper->setCursor(tile_x + (tile_w - rect2.w) / 2, top + rect1.h + gap);
+        epaper->setCursor(label_x + (label_w - rect2.w) / 2, top + rect1.h + gap);
         epaper->write(line2);
     }
 }
@@ -280,8 +358,8 @@ static uint8_t list_page_count(uint8_t item_count) {
     return static_cast<uint8_t>((item_count + ROOM_LIST_ROOMS_PER_PAGE - 1) / ROOM_LIST_ROOMS_PER_PAGE);
 }
 
-static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_LEN], uint8_t item_count, uint8_t list_page,
-                              uint16_t grid_start_y) {
+static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_LEN], const char icons[][MAX_ICON_NAME_LEN], uint8_t item_count,
+                              uint8_t list_page, uint16_t grid_start_y) {
     const uint8_t total_pages = list_page_count(item_count);
     const uint8_t page = std::min(list_page, static_cast<uint8_t>(total_pages - 1));
     const uint8_t first_idx = page * ROOM_LIST_ROOMS_PER_PAGE;
@@ -300,14 +378,24 @@ static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_
         const int16_t tile_y = grid_start_y + row * (tile_h + ROOM_LIST_GRID_GAP_Y);
 
         epaper->drawRect(tile_x, tile_y, tile_w, tile_h, BBEP_BLACK);
-        ui_draw_room_tile_label(epaper, tile_x, tile_y, tile_w, tile_h, names[idx]);
+        const char* icon_name = icons ? icons[idx] : nullptr;
+        const bool has_icon = ui_draw_room_tile_icon(epaper, tile_x, tile_y, tile_w, tile_h, icon_name);
+
+        int16_t label_y = tile_y + 4;
+        int16_t label_h = tile_h - 8;
+        if (has_icon) {
+            label_y = tile_y + ROOM_LIST_TILE_ICON_TOP_PADDING + ROOM_LIST_TILE_ICON_SIZE + ROOM_LIST_TILE_ICON_LABEL_GAP;
+            label_h = tile_h - (label_y - tile_y) - ROOM_LIST_TILE_LABEL_BOTTOM_PADDING;
+        }
+
+        ui_draw_room_tile_label(epaper, tile_x, label_y, tile_w, label_h, names[idx]);
     }
 
     if (total_pages > 1) {
         char page_text[20];
         snprintf(page_text, sizeof(page_text), "Page %u/%u", page + 1, total_pages);
 
-        epaper->setFont(FONT_8x8);
+        epaper->setFont(Montserrat_Regular_16);
         BB_RECT label_rect = get_text_box(epaper, page_text);
         const int16_t label_width = label_rect.w;
         epaper->setCursor(DISPLAY_WIDTH - ROOM_LIST_GRID_MARGIN_X - label_width, ROOM_LIST_FOOTER_Y);
@@ -325,14 +413,14 @@ void ui_draw_floor_list(FASTEPD* epaper, const FloorListSnapshot* snapshot, uint
         return;
     }
 
-    ui_draw_name_grid(epaper, snapshot->floor_names, snapshot->floor_count, floor_list_page, FLOOR_LIST_GRID_START_Y);
+    ui_draw_name_grid(epaper, snapshot->floor_names, snapshot->floor_icons, snapshot->floor_count, floor_list_page, FLOOR_LIST_GRID_START_Y);
 }
 
 void ui_draw_room_list_header(FASTEPD* epaper, const char* floor_name) {
     epaper->drawRect(ROOM_CONTROLS_BACK_X, ROOM_CONTROLS_BACK_Y, ROOM_CONTROLS_BACK_W, ROOM_CONTROLS_BACK_H, BBEP_BLACK);
     ui_draw_back_icon(epaper);
 
-    epaper->setFont(FONT_16x16);
+    epaper->setFont(Montserrat_Regular_20);
     char floor_label[MAX_FLOOR_NAME_LEN];
     strncpy(floor_label, floor_name ? floor_name : "", sizeof(floor_label) - 1);
     floor_label[sizeof(floor_label) - 1] = '\0';
@@ -354,52 +442,96 @@ void ui_draw_room_list(FASTEPD* epaper, const RoomListSnapshot* snapshot, uint8_
         return;
     }
 
-    ui_draw_name_grid(epaper, snapshot->room_names, snapshot->room_count, room_list_page, ROOM_LIST_GRID_START_Y);
+    ui_draw_name_grid(epaper, snapshot->room_names, snapshot->room_icons, snapshot->room_count, room_list_page, ROOM_LIST_GRID_START_Y);
 }
 
 bool ui_build_room_controls(Screen* screen, const RoomControlsSnapshot* snapshot, bool* geometry_truncated) {
     *geometry_truncated = snapshot->truncated;
     screen_clear(screen);
 
+    const uint16_t full_width = static_cast<uint16_t>(DISPLAY_WIDTH - 2 * ROOM_CONTROLS_ITEM_X);
+    const uint16_t light_width =
+        static_cast<uint16_t>((full_width - ROOM_CONTROLS_LIGHT_COLUMN_GAP) / 2);
+
     uint16_t pos_y = ROOM_CONTROLS_ITEM_START_Y;
+    uint8_t light_col = 0;
     for (uint8_t idx = 0; idx < snapshot->entity_count; idx++) {
-        if (pos_y + BUTTON_SIZE > DISPLAY_HEIGHT) {
-            *geometry_truncated = true;
-            break;
+        const bool is_climate = snapshot->entity_types[idx] == CommandType::SetClimateModeAndTemperature;
+
+        if (is_climate) {
+            if (light_col != 0) {
+                pos_y += ROOM_CONTROLS_LIGHT_HEIGHT + ROOM_CONTROLS_ITEM_GAP;
+                light_col = 0;
+            }
+
+            if (pos_y + ROOM_CONTROLS_CLIMATE_HEIGHT > DISPLAY_HEIGHT) {
+                *geometry_truncated = true;
+                break;
+            }
+
+            screen_add_climate(
+                ClimateConfig{
+                    .entity_ref = EntityRef{.index = snapshot->entity_ids[idx]},
+                    .label = snapshot->entity_names[idx],
+                    .climate_mode_mask = snapshot->entity_climate_mode_masks[idx],
+                    .pos_x = ROOM_CONTROLS_ITEM_X,
+                    .pos_y = pos_y,
+                    .width = full_width,
+                    .height = ROOM_CONTROLS_CLIMATE_HEIGHT,
+                },
+                screen);
+
+            pos_y += ROOM_CONTROLS_CLIMATE_HEIGHT + ROOM_CONTROLS_ITEM_GAP;
+        } else {
+            if (pos_y + ROOM_CONTROLS_LIGHT_HEIGHT > DISPLAY_HEIGHT) {
+                *geometry_truncated = true;
+                break;
+            }
+
+            screen_add_button(
+                ButtonConfig{
+                    .entity_ref = EntityRef{.index = snapshot->entity_ids[idx]},
+                    .label = snapshot->entity_names[idx],
+                    .icon_on = lightbulb_outline,
+                    .icon_off = lightbulb_off_outline,
+                    .pos_x = static_cast<uint16_t>(ROOM_CONTROLS_ITEM_X + light_col * (light_width + ROOM_CONTROLS_LIGHT_COLUMN_GAP)),
+                    .pos_y = pos_y,
+                    .width = light_width,
+                    .height = ROOM_CONTROLS_LIGHT_HEIGHT,
+                },
+                screen);
+
+            if (light_col == 0) {
+                light_col = 1;
+            } else {
+                light_col = 0;
+                pos_y += ROOM_CONTROLS_LIGHT_HEIGHT + ROOM_CONTROLS_ITEM_GAP;
+            }
         }
-
-        screen_add_button(
-            ButtonConfig{
-                .entity_ref = EntityRef{.index = snapshot->entity_ids[idx]},
-                .label = snapshot->entity_names[idx],
-                .icon_on = lightbulb_outline,
-                .icon_off = lightbulb_off_outline,
-                .pos_x = ROOM_CONTROLS_ITEM_X,
-                .pos_y = pos_y,
-            },
-            screen);
-
-        pos_y += ROOM_CONTROLS_ITEM_SPACING;
     }
 
     return screen->widget_count > 0 || snapshot->entity_count == 0;
 }
 
 void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, bool truncated) {
-    epaper->setFont(Montserrat_Regular_26);
+    epaper->setFont(Montserrat_Regular_20);
     epaper->setTextColor(BBEP_BLACK);
 
     epaper->drawRect(ROOM_CONTROLS_BACK_X, ROOM_CONTROLS_BACK_Y, ROOM_CONTROLS_BACK_W, ROOM_CONTROLS_BACK_H, BBEP_BLACK);
     ui_draw_back_icon(epaper);
 
-    epaper->setCursor(ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 24, ROOM_CONTROLS_BACK_Y + 40);
-    epaper->write(room_name);
+    char room_label[MAX_ROOM_NAME_LEN];
+    strncpy(room_label, room_name ? room_name : "", sizeof(room_label) - 1);
+    room_label[sizeof(room_label) - 1] = '\0';
+    truncate_with_ellipsis(epaper, room_label, sizeof(room_label), DISPLAY_WIDTH - (ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32) - 8);
+    epaper->setCursor(ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 36);
+    epaper->write(room_label);
 
     epaper->drawLine(0, ROOM_CONTROLS_HEADER_HEIGHT, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, BBEP_BLACK);
 
     if (truncated) {
         epaper->setCursor(ROOM_CONTROLS_ITEM_X, DISPLAY_HEIGHT - 20);
-        epaper->write("Too many lights for one page");
+        epaper->write("Too many controls for one page");
     }
 }
 

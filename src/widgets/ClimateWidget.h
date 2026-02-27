@@ -1,12 +1,13 @@
 #pragma once
 
+#include "climate_value.h"
 #include "constants.h"
 #include "widgets/Widget.h"
 #include <FastEPD.h>
 
-class OnOffButton : public Widget {
+class ClimateWidget : public Widget {
 public:
-    OnOffButton(const char* label, const uint8_t* on_icon, const uint8_t* off_icon, Rect rect);
+    ClimateWidget(const char* label, Rect rect, uint8_t climate_mode_mask);
 
     void fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) override;
     Rect partialDraw(FASTEPD* display, BitDepth depth, uint8_t from, uint8_t to) override;
@@ -15,13 +16,13 @@ public:
 
 private:
     char label_[MAX_ENTITY_NAME_LEN];
-    FASTEPD off_sprite_4bpp;
-    FASTEPD on_sprite_4bpp;
-    FASTEPD off_sprite_1bpp;
-    FASTEPD on_sprite_1bpp;
     Rect rect_;
     Rect hit_rect_;
-    Rect icon_rect_;
     Rect label_rect_;
-    uint16_t sprite_size_;
+    ClimateMode mode_buttons_[3];
+    uint8_t mode_button_count_;
+    Rect mode_rects_[3];
+    Rect minus_rect_;
+    Rect plus_rect_;
+    Rect temp_adjust_value_rect_;
 };

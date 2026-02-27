@@ -1,6 +1,7 @@
 #include <IPAddress.h> // fixes compilation issues with esp_websocket_client
 
 #include "config.h"
+#include "climate_value.h"
 #include "constants.h"
 #include "esp_log.h"
 #include "esp_websocket_client.h"
@@ -38,8 +39,8 @@ typedef struct home_assistant_context {
     // reconstruct a coherent value (on/off + brightness/percentage).
     uint8_t entity_count;
     const char* entity_ids[MAX_ENTITIES];
-    bool entity_states[MAX_ENTITIES];
-    int8_t entity_values[MAX_ENTITIES]; // -1 = unknown (handles binary-like entities)
+    uint8_t entity_modes[MAX_ENTITIES]; // 0/1 for lights, ClimateMode value for climate
+    int8_t entity_values[MAX_ENTITIES]; // brightness percentage or climate temp steps (-1 unknown)
     TickType_t last_command_sent_at_ms[MAX_ENTITIES];
 
     // Mapping floor_id -> floor index in store
@@ -85,6 +86,17 @@ static void copy_string(char* dst, size_t dst_len, const char* src) {
     dst[dst_len - 1] = '\0';
 }
 
+static const char* get_optional_string(cJSON* object, const char* key, const char* compact_key) {
+    cJSON* item = cJSON_GetObjectItem(object, key);
+    if (!cJSON_IsString(item) && compact_key) {
+        item = cJSON_GetObjectItem(object, compact_key);
+    }
+    if (!cJSON_IsString(item) || !item->valuestring) {
+        return nullptr;
+    }
+    return item->valuestring;
+}
+
 static void hass_reset_discovery_state(home_assistant_context_t* hass) {
     xSemaphoreTake(hass->mutex, portMAX_DELAY);
     hass->floor_registry_request_id = 0;
@@ -105,7 +117,7 @@ static void hass_reset_discovery_state(home_assistant_context_t* hass) {
     memset(hass->device_ids, 0, sizeof(hass->device_ids));
     memset(hass->device_room_indices, -1, sizeof(hass->device_room_indices));
     memset(hass->entity_ids, 0, sizeof(hass->entity_ids));
-    memset(hass->entity_states, 0, sizeof(hass->entity_states));
+    memset(hass->entity_modes, 0, sizeof(hass->entity_modes));
     memset(hass->entity_values, -1, sizeof(hass->entity_values));
     memset(hass->last_command_sent_at_ms, 0, sizeof(hass->last_command_sent_at_ms));
     xSemaphoreGive(hass->mutex);
@@ -118,8 +130,8 @@ static void hass_refresh_entities_from_store(home_assistant_context_t* hass) {
     hass->entity_count = hass->store->entity_count;
     for (uint8_t entity_idx = 0; entity_idx < hass->entity_count; entity_idx++) {
         hass->entity_ids[entity_idx] = hass->store->entities[entity_idx].entity_id;
+        hass->entity_modes[entity_idx] = 0;
         hass->entity_values[entity_idx] = -1;
-        hass->entity_states[entity_idx] = false;
         hass->last_command_sent_at_ms[entity_idx] = 0;
     }
 
@@ -324,7 +336,7 @@ int16_t hass_ensure_other_floor(home_assistant_context_t* hass) {
         return existing_idx;
     }
 
-    int8_t floor_idx = store_add_floor(hass->store, "Other Areas");
+    int8_t floor_idx = store_add_floor(hass->store, "Other Areas", nullptr);
     if (floor_idx < 0) {
         return -1;
     }
@@ -367,47 +379,132 @@ int16_t hass_find_room_for_device(home_assistant_context_t* hass, const char* de
 }
 
 void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx, cJSON* item) {
-    bool entity_state = false;
+    uint8_t entity_mode = 0;
     int8_t entity_value = -1;
+    CommandType command_type = CommandType::SetLightBrightnessPercentage;
+    uint8_t climate_mode_mask = CLIMATE_MODE_MASK_DEFAULT;
+    uint8_t previous_climate_mode_mask = CLIMATE_MODE_MASK_DEFAULT;
 
     xSemaphoreTake(hass->mutex, portMAX_DELAY);
-    entity_state = hass->entity_states[widget_idx];
+    entity_mode = hass->entity_modes[widget_idx];
     entity_value = hass->entity_values[widget_idx];
+    xSemaphoreTake(hass->store->mutex, portMAX_DELAY);
+    command_type = hass->store->entities[widget_idx].command_type;
+    if (command_type == CommandType::SetClimateModeAndTemperature) {
+        previous_climate_mode_mask = climate_normalize_mode_mask(hass->store->entities[widget_idx].climate_mode_mask);
+        climate_mode_mask = previous_climate_mode_mask;
+    }
+    xSemaphoreGive(hass->store->mutex);
 
     cJSON* state = cJSON_GetObjectItem(item, "s");
-    if (cJSON_IsString(state)) {
-        if (strcmp(state->valuestring, "on") == 0) {
-            entity_state = true;
-        } else if (strcmp(state->valuestring, "off") == 0) {
-            entity_state = false;
-        }
-    }
-
     cJSON* attributes = cJSON_GetObjectItem(item, "a");
-    if (cJSON_IsObject(attributes)) {
-        cJSON* percentage = cJSON_GetObjectItem(attributes, "percentage");
-        if (cJSON_IsNumber(percentage)) {
-            entity_value = percentage->valueint;
+
+    uint8_t value = 0;
+    if (command_type == CommandType::SetClimateModeAndTemperature) {
+        ClimateMode mode = static_cast<ClimateMode>(entity_mode);
+        if (mode != ClimateMode::Off && mode != ClimateMode::Heat && mode != ClimateMode::Cool) {
+            mode = ClimateMode::Off;
         }
 
-        cJSON* brightness = cJSON_GetObjectItem(attributes, "brightness");
-        if (cJSON_IsNumber(brightness)) {
-            entity_value = brightness->valueint * 100 / 254;
+        if (cJSON_IsObject(attributes)) {
+            cJSON* hvac_modes = cJSON_GetObjectItem(attributes, "hvac_modes");
+            if (cJSON_IsArray(hvac_modes)) {
+                uint8_t parsed_mode_mask = 0;
+                cJSON* hvac_mode_item = nullptr;
+                cJSON_ArrayForEach(hvac_mode_item, hvac_modes) {
+                    if (!cJSON_IsString(hvac_mode_item)) {
+                        continue;
+                    }
+
+                    const char* hvac_mode = hvac_mode_item->valuestring;
+                    if (strcmp(hvac_mode, "off") == 0) {
+                        parsed_mode_mask |= CLIMATE_MODE_MASK_OFF;
+                    } else if (strcmp(hvac_mode, "heat") == 0 || strcmp(hvac_mode, "heating") == 0) {
+                        parsed_mode_mask |= CLIMATE_MODE_MASK_HEAT;
+                    } else if (strcmp(hvac_mode, "cool") == 0 || strcmp(hvac_mode, "cooling") == 0) {
+                        parsed_mode_mask |= CLIMATE_MODE_MASK_COOL;
+                    } else if (strcmp(hvac_mode, "heat_cool") == 0) {
+                        parsed_mode_mask |= CLIMATE_MODE_MASK_HEAT | CLIMATE_MODE_MASK_COOL;
+                    }
+                }
+
+                if ((parsed_mode_mask & (CLIMATE_MODE_MASK_HEAT | CLIMATE_MODE_MASK_COOL)) != 0) {
+                    climate_mode_mask = climate_normalize_mode_mask(parsed_mode_mask);
+                }
+            }
         }
 
-        cJSON* off_brightness = cJSON_GetObjectItem(attributes, "off_brightness");
-        if (cJSON_IsNumber(off_brightness)) {
-            entity_value = off_brightness->valueint * 100 / 254;
+        if (cJSON_IsString(state)) {
+            if (strcmp(state->valuestring, "off") == 0) {
+                mode = ClimateMode::Off;
+            } else if (strcmp(state->valuestring, "heat") == 0 || strcmp(state->valuestring, "heating") == 0) {
+                mode = ClimateMode::Heat;
+            } else if (strcmp(state->valuestring, "cool") == 0 || strcmp(state->valuestring, "cooling") == 0) {
+                mode = ClimateMode::Cool;
+            }
+        }
+        if (!climate_is_mode_supported(climate_mode_mask, mode)) {
+            mode = climate_default_enabled_mode(climate_mode_mask);
+        }
+
+        uint8_t temp_steps = entity_value >= 0 ? climate_clamp_temp_steps(entity_value) : climate_celsius_to_steps(20.0f);
+        if (cJSON_IsObject(attributes)) {
+            cJSON* target_temp = cJSON_GetObjectItem(attributes, "temperature");
+            if (!cJSON_IsNumber(target_temp)) {
+                target_temp = cJSON_GetObjectItem(attributes, "target_temp_low");
+            }
+            if (cJSON_IsNumber(target_temp)) {
+                temp_steps = climate_celsius_to_steps(static_cast<float>(target_temp->valuedouble));
+            }
+        }
+
+        entity_mode = static_cast<uint8_t>(mode);
+        entity_value = static_cast<int8_t>(temp_steps);
+        value = climate_pack_value(mode, temp_steps);
+    } else {
+        bool is_on = entity_mode != 0;
+
+        if (cJSON_IsString(state)) {
+            if (strcmp(state->valuestring, "on") == 0) {
+                is_on = true;
+            } else if (strcmp(state->valuestring, "off") == 0) {
+                is_on = false;
+            }
+        }
+
+        if (cJSON_IsObject(attributes)) {
+            cJSON* percentage = cJSON_GetObjectItem(attributes, "percentage");
+            if (cJSON_IsNumber(percentage)) {
+                entity_value = percentage->valueint;
+            }
+
+            cJSON* brightness = cJSON_GetObjectItem(attributes, "brightness");
+            if (cJSON_IsNumber(brightness)) {
+                entity_value = brightness->valueint * 100 / 254;
+            }
+
+            cJSON* off_brightness = cJSON_GetObjectItem(attributes, "off_brightness");
+            if (cJSON_IsNumber(off_brightness)) {
+                entity_value = off_brightness->valueint * 100 / 254;
+            }
+        }
+
+        entity_mode = is_on ? 1 : 0;
+        if (is_on) {
+            value = entity_value < 0 ? 1 : static_cast<uint8_t>(entity_value);
         }
     }
 
-    hass->entity_states[widget_idx] = entity_state;
+    hass->entity_modes[widget_idx] = entity_mode;
     hass->entity_values[widget_idx] = entity_value;
+    if (command_type == CommandType::SetClimateModeAndTemperature) {
+        xSemaphoreTake(hass->store->mutex, portMAX_DELAY);
+        hass->store->entities[widget_idx].climate_mode_mask = climate_mode_mask;
+        xSemaphoreGive(hass->store->mutex);
+    }
 
     TickType_t now = xTaskGetTickCount();
-    bool ignore_update =
-        (now - hass->last_command_sent_at_ms[widget_idx]) < pdMS_TO_TICKS(HASS_IGNORE_UPDATE_DELAY_MS);
-
+    bool ignore_update = (now - hass->last_command_sent_at_ms[widget_idx]) < pdMS_TO_TICKS(HASS_IGNORE_UPDATE_DELAY_MS);
     const char* entity_id = hass->entity_ids[widget_idx];
     xSemaphoreGive(hass->mutex);
 
@@ -416,13 +513,11 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
         return;
     }
 
-    uint8_t value = 0;
-    if (entity_state) {
-        value = entity_value < 0 ? 1 : static_cast<uint8_t>(entity_value);
-    }
-
     ESP_LOGI(TAG, "Setting value of widget %d to %d", widget_idx, value);
     store_update_value(hass->store, widget_idx, value);
+    if (command_type == CommandType::SetClimateModeAndTemperature && climate_mode_mask != previous_climate_mode_mask) {
+        store_bump_rooms_revision(hass->store);
+    }
 }
 
 void hass_handle_entity_update(home_assistant_context_t* hass, cJSON* event) {
@@ -463,33 +558,29 @@ void hass_parse_floor_registry(home_assistant_context_t* hass, cJSON* result) {
 
     cJSON* item = nullptr;
     cJSON_ArrayForEach(item, result) {
-        cJSON* floor_id_item = cJSON_GetObjectItem(item, "floor_id");
-        if (!cJSON_IsString(floor_id_item)) {
-            floor_id_item = cJSON_GetObjectItem(item, "id");
+        const char* floor_id = get_optional_string(item, "floor_id", nullptr);
+        if (!floor_id) {
+            floor_id = get_optional_string(item, "id", "fi");
         }
-        if (!cJSON_IsString(floor_id_item)) {
-            floor_id_item = cJSON_GetObjectItem(item, "fi");
-        }
+        const char* floor_name = get_optional_string(item, "name", "n");
+        const char* floor_icon = get_optional_string(item, "icon", "ic");
 
-        cJSON* name_item = cJSON_GetObjectItem(item, "name");
-        if (!cJSON_IsString(name_item)) {
-            name_item = cJSON_GetObjectItem(item, "n");
-        }
-
-        if (!cJSON_IsString(floor_id_item) || !cJSON_IsString(name_item)) {
+        if (!floor_id || !floor_name) {
             continue;
         }
 
-        int8_t floor_idx = store_add_floor(hass->store, name_item->valuestring);
+        ESP_LOGI(TAG, "[ICON] floor '%s' (id=%s) icon=%s", floor_name, floor_id, floor_icon ? floor_icon : "(none)");
+
+        int8_t floor_idx = store_add_floor(hass->store, floor_name, floor_icon);
         if (floor_idx < 0) {
-            ESP_LOGW(TAG, "Skipping floor %s: floor limit reached", floor_id_item->valuestring);
+            ESP_LOGW(TAG, "Skipping floor %s: floor limit reached", floor_id);
             continue;
         }
 
         xSemaphoreTake(hass->mutex, portMAX_DELAY);
         if (hass->floor_count < MAX_FLOORS) {
             uint8_t idx = hass->floor_count++;
-            copy_string(hass->floor_ids[idx], sizeof(hass->floor_ids[idx]), floor_id_item->valuestring);
+            copy_string(hass->floor_ids[idx], sizeof(hass->floor_ids[idx]), floor_id);
             hass->floor_store_indices[idx] = floor_idx;
         }
         xSemaphoreGive(hass->mutex);
@@ -503,47 +594,40 @@ void hass_parse_area_registry(home_assistant_context_t* hass, cJSON* result) {
 
     cJSON* item = nullptr;
     cJSON_ArrayForEach(item, result) {
-        cJSON* area_id_item = cJSON_GetObjectItem(item, "area_id");
-        if (!cJSON_IsString(area_id_item)) {
-            area_id_item = cJSON_GetObjectItem(item, "ai");
-        }
+        const char* area_id = get_optional_string(item, "area_id", "ai");
+        const char* area_name = get_optional_string(item, "name", "n");
+        const char* floor_id = get_optional_string(item, "floor_id", "fl");
+        const char* area_icon = get_optional_string(item, "icon", "ic");
 
-        cJSON* name_item = cJSON_GetObjectItem(item, "name");
-        if (!cJSON_IsString(name_item)) {
-            name_item = cJSON_GetObjectItem(item, "n");
-        }
-
-        cJSON* floor_id_item = cJSON_GetObjectItem(item, "floor_id");
-        if (!cJSON_IsString(floor_id_item)) {
-            floor_id_item = cJSON_GetObjectItem(item, "fl");
-        }
-
-        if (!cJSON_IsString(area_id_item) || !cJSON_IsString(name_item)) {
+        if (!area_id || !area_name) {
             continue;
         }
 
+        ESP_LOGI(TAG, "[ICON] room '%s' (area_id=%s, floor_id=%s) icon=%s", area_name, area_id, floor_id ? floor_id : "(none)",
+                 area_icon ? area_icon : "(none)");
+
         int16_t floor_idx = -1;
-        if (cJSON_IsString(floor_id_item)) {
-            floor_idx = hass_find_floor_for_floor_id(hass, floor_id_item->valuestring);
+        if (floor_id) {
+            floor_idx = hass_find_floor_for_floor_id(hass, floor_id);
         }
         if (floor_idx < 0) {
             floor_idx = hass_ensure_other_floor(hass);
         }
         if (floor_idx < 0) {
-            ESP_LOGW(TAG, "Skipping area %s: no floor slot available", area_id_item->valuestring);
+            ESP_LOGW(TAG, "Skipping area %s: no floor slot available", area_id);
             continue;
         }
 
-        int8_t room_idx = store_add_room(hass->store, name_item->valuestring, static_cast<int8_t>(floor_idx));
+        int8_t room_idx = store_add_room(hass->store, area_name, area_icon, static_cast<int8_t>(floor_idx));
         if (room_idx < 0) {
-            ESP_LOGW(TAG, "Skipping area %s: room limit reached", area_id_item->valuestring);
+            ESP_LOGW(TAG, "Skipping area %s: room limit reached", area_id);
             continue;
         }
 
         xSemaphoreTake(hass->mutex, portMAX_DELAY);
         if (hass->area_count < MAX_ROOMS) {
             uint8_t area_idx = hass->area_count++;
-            copy_string(hass->area_ids[area_idx], sizeof(hass->area_ids[area_idx]), area_id_item->valuestring);
+            copy_string(hass->area_ids[area_idx], sizeof(hass->area_ids[area_idx]), area_id);
             hass->area_room_indices[area_idx] = room_idx;
         }
         xSemaphoreGive(hass->mutex);
@@ -614,10 +698,19 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
         cJSON* hidden_bool_item = cJSON_GetObjectItem(item, "hb");
         cJSON* disabled_by_item = cJSON_GetObjectItem(item, "disabled_by");
 
-        if (!cJSON_IsString(entity_id_item) || strncmp(entity_id_item->valuestring, "light.", 6) != 0) {
+        if (!cJSON_IsString(entity_id_item)) {
             continue;
         }
         if (cJSON_IsString(hidden_by_item) || cJSON_IsString(disabled_by_item) || cJSON_IsTrue(hidden_bool_item)) {
+            continue;
+        }
+
+        CommandType command_type;
+        if (strncmp(entity_id_item->valuestring, "light.", 6) == 0) {
+            command_type = CommandType::SetLightBrightnessPercentage;
+        } else if (strncmp(entity_id_item->valuestring, "climate.", 8) == 0) {
+            command_type = CommandType::SetClimateModeAndTemperature;
+        } else {
             continue;
         }
 
@@ -646,10 +739,10 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
 
         EntityConfig entity = {
             .entity_id = entity_id_item->valuestring,
-            .command_type = CommandType::SetLightBrightnessPercentage,
+            .command_type = command_type,
         };
         if (store_add_entity_to_room(hass->store, room_idx, entity, display_name) < 0) {
-            ESP_LOGW(TAG, "Skipping light %s: limits reached", entity_id_item->valuestring);
+            ESP_LOGW(TAG, "Skipping entity %s: limits reached", entity_id_item->valuestring);
         }
     }
 }
@@ -732,7 +825,7 @@ void hass_handle_result(home_assistant_context_t* hass, cJSON* json) {
         if (entity_count > 0) {
             hass_set_pending_discovery_command(hass, DiscoveryCommandSubscribeEntities);
         } else {
-            ESP_LOGW(TAG, "No light entities discovered for mapped rooms");
+            ESP_LOGW(TAG, "No light/climate entities discovered for mapped rooms");
             hass_update_state(hass, ConnState::Up);
         }
         return;
@@ -834,54 +927,90 @@ static void hass_ws_event_handler(void* handler_args, esp_event_base_t base, int
     }
 }
 
-void hass_send_command(home_assistant_context_t* hass, Command* cmd) {
+static void hass_send_call_service(home_assistant_context_t* hass, const char* domain, const char* service, cJSON* service_data) {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "id", hass_generate_event_id(hass));
     cJSON_AddStringToObject(root, "type", "call_service");
-
-    cJSON* service_data = cJSON_CreateObject();
-    cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
-
-    switch (cmd->type) {
-    case CommandType::SetLightBrightnessPercentage:
-        cJSON_AddStringToObject(root, "domain", "light");
-        if (cmd->value == 0) {
-            cJSON_AddStringToObject(root, "service", "turn_off");
-        } else {
-            cJSON_AddStringToObject(root, "service", "turn_on");
-            cJSON_AddNumberToObject(service_data, "brightness_pct", cmd->value);
-        }
-        break;
-    case CommandType::SetFanSpeedPercentage:
-        cJSON_AddStringToObject(root, "domain", "fan");
-        cJSON_AddStringToObject(root, "service", "set_percentage");
-        cJSON_AddNumberToObject(service_data, "percentage", cmd->value);
-        break;
-    case CommandType::SwitchOnOff:
-        cJSON_AddStringToObject(root, "domain", "switch");
-        cJSON_AddStringToObject(root, "service", cmd->value == 0 ? "turn_off" : "turn_on");
-        break;
-    case CommandType::AutomationOnOff:
-        cJSON_AddStringToObject(root, "domain", "automation");
-        cJSON_AddStringToObject(root, "service", cmd->value == 0 ? "turn_off" : "turn_on");
-        break;
-    default:
-        ESP_LOGI(TAG, "Service type not supported");
-        cJSON_Delete(service_data);
-        cJSON_Delete(root);
-        return;
-    }
+    cJSON_AddStringToObject(root, "domain", domain);
+    cJSON_AddStringToObject(root, "service", service);
     cJSON_AddItemToObject(root, "service_data", service_data);
 
     char* request = cJSON_PrintUnformatted(root);
     ESP_LOGI(TAG, "Sending %s", request);
-
-    xSemaphoreTake(hass->mutex, portMAX_DELAY);
-    hass->last_command_sent_at_ms[cmd->entity_idx] = xTaskGetTickCount();
-    xSemaphoreGive(hass->mutex);
     esp_websocket_client_send_text(hass->client, request, strlen(request), portMAX_DELAY);
     cJSON_free(request);
     cJSON_Delete(root);
+}
+
+static const char* climate_mode_service_value(ClimateMode mode) {
+    switch (mode) {
+    case ClimateMode::Heat:
+        return "heat";
+    case ClimateMode::Cool:
+        return "cool";
+    case ClimateMode::Off:
+    default:
+        return "off";
+    }
+}
+
+void hass_send_command(home_assistant_context_t* hass, Command* cmd) {
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    hass->last_command_sent_at_ms[cmd->entity_idx] = xTaskGetTickCount();
+    xSemaphoreGive(hass->mutex);
+
+    switch (cmd->type) {
+    case CommandType::SetLightBrightnessPercentage: {
+        cJSON* service_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
+        if (cmd->value == 0) {
+            hass_send_call_service(hass, "light", "turn_off", service_data);
+        } else {
+            cJSON_AddNumberToObject(service_data, "brightness_pct", cmd->value);
+            hass_send_call_service(hass, "light", "turn_on", service_data);
+        }
+        break;
+    }
+    case CommandType::SetClimateModeAndTemperature: {
+        ClimateMode mode = climate_unpack_mode(cmd->value);
+        float target_c = climate_steps_to_celsius(climate_unpack_temp_steps(cmd->value));
+
+        cJSON* mode_service_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(mode_service_data, "entity_id", cmd->entity_id);
+        cJSON_AddStringToObject(mode_service_data, "hvac_mode", climate_mode_service_value(mode));
+        hass_send_call_service(hass, "climate", "set_hvac_mode", mode_service_data);
+
+        if (mode != ClimateMode::Off) {
+            cJSON* temp_service_data = cJSON_CreateObject();
+            cJSON_AddStringToObject(temp_service_data, "entity_id", cmd->entity_id);
+            cJSON_AddNumberToObject(temp_service_data, "temperature", target_c);
+            hass_send_call_service(hass, "climate", "set_temperature", temp_service_data);
+        }
+        break;
+    }
+    case CommandType::SetFanSpeedPercentage: {
+        cJSON* service_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
+        cJSON_AddNumberToObject(service_data, "percentage", cmd->value);
+        hass_send_call_service(hass, "fan", "set_percentage", service_data);
+        break;
+    }
+    case CommandType::SwitchOnOff: {
+        cJSON* service_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
+        hass_send_call_service(hass, "switch", cmd->value == 0 ? "turn_off" : "turn_on", service_data);
+        break;
+    }
+    case CommandType::AutomationOnOff: {
+        cJSON* service_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
+        hass_send_call_service(hass, "automation", cmd->value == 0 ? "turn_off" : "turn_on", service_data);
+        break;
+    }
+    default:
+        ESP_LOGI(TAG, "Service type not supported");
+        break;
+    }
 }
 
 void home_assistant_task(void* arg) {
