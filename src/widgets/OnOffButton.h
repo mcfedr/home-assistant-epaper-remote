@@ -1,5 +1,6 @@
 #pragma once
 
+#include "constants.h"
 #include "widgets/Widget.h"
 #include <FastEPD.h>
 
@@ -13,7 +14,7 @@ public:
     uint8_t getValueFromTouch(const TouchEvent* touch_event, uint8_t original_value) const override;
 
 private:
-    const char* label_;
+    char label_[MAX_ENTITY_NAME_LEN];
     FASTEPD off_sprite_4bpp;
     FASTEPD on_sprite_4bpp;
     FASTEPD off_sprite_1bpp;

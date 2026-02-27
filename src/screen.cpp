@@ -46,3 +46,12 @@ void screen_add_button(ButtonConfig config, Screen* screen) {
     screen->widgets[widget_idx] = widget;
     screen->entity_ids[widget_idx] = config.entity_ref.index;
 }
+
+void screen_clear(Screen* screen) {
+    for (size_t idx = 0; idx < screen->widget_count; idx++) {
+        delete screen->widgets[idx];
+        screen->widgets[idx] = nullptr;
+        screen->entity_ids[idx] = 0;
+    }
+    screen->widget_count = 0;
+}

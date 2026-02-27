@@ -3,6 +3,7 @@
 #include "assets/icons.h"
 #include "constants.h"
 #include <FastEPD.h>
+#include <cstring>
 
 FASTEPD
 sprite_left_empty_4bpp, sprite_left_full_4bpp, sprite_right_empty_4bpp, sprite_right_full_4bpp, sprite_left_empty_1bpp,
@@ -55,8 +56,10 @@ void initialize_slider_sprites() {
 }
 
 Slider::Slider(const char* label, const uint8_t* on_icon, const uint8_t* off_icon, Rect rect)
-    : label_(label)
-    , rect_(rect) {
+    : rect_(rect) {
+    strncpy(label_, label ? label : "", sizeof(label_) - 1);
+    label_[sizeof(label_) - 1] = '\0';
+
     on_sprite_4bpp.initSprite(BUTTON_ICON_SIZE, BUTTON_ICON_SIZE);
     on_sprite_4bpp.setMode(BB_MODE_4BPP);
     on_sprite_4bpp.loadBMP(on_icon, 0, 0, BBEP_BLACK, 0xf);

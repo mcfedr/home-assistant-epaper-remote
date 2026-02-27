@@ -41,7 +41,7 @@ void setup() {
     ui_task_args.screen = &screen;
     ui_task_args.store = &store;
     ui_task_args.shared_state = &shared_ui_state;
-    xTaskCreate(ui_task, "ui", 2048, &ui_task_args, 1, &store.ui_task);
+    xTaskCreate(ui_task, "ui", 4096, &ui_task_args, 1, &store.ui_task);
 
     // Connect to wifi and launch watcher
     launch_wifi(&config, &store);

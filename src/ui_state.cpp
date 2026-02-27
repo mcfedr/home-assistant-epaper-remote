@@ -5,6 +5,8 @@
 
 void ui_state_init(SharedUIState* state) {
     state->mutex = xSemaphoreCreateMutex();
+    state->version = 0;
+    state->state = UIState{};
 }
 
 void ui_state_set(SharedUIState* state, const UIState* new_state) {

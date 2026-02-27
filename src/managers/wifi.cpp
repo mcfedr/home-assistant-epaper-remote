@@ -16,12 +16,19 @@ void launch_wifi(Configuration* config, EntityStore* store) {
             break;
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
         case ARDUINO_EVENT_WIFI_STA_LOST_IP:
-            ESP_LOGI(TAG, "disconnected");
+            ESP_LOGI(TAG, "disconnected (reason=%d), reconnecting", info.wifi_sta_disconnected.reason);
             store_set_wifi_state(store, ConnState::ConnectionError);
+            WiFi.reconnect();
             break;
         }
     });
 
+    // Keep credentials in app code only and reset previous STA profile to avoid stale NVS state.
+    WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
+    WiFi.disconnect(false, true);
+    WiFi.setAutoReconnect(true);
+    WiFi.setSleep(false);
     WiFi.begin(config->wifi_ssid, config->wifi_password);
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
 }

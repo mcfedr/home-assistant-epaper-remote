@@ -12,11 +12,18 @@ enum class UiMode : uint8_t {
     WifiDisconnected,
     HassDisconnected,
     HassInvalidKey,
-    MainScreen,
+    FloorList,
+    RoomList,
+    RoomControls,
 };
 
 struct UIState {
     UiMode mode = UiMode::Blank;
+    int8_t selected_floor = -1;
+    int8_t selected_room = -1;
+    uint8_t floor_list_page = 0;
+    uint8_t room_list_page = 0;
+    uint32_t rooms_revision = 0;
     uint8_t widget_values[MAX_WIDGETS_PER_SCREEN] = {};
 };
 

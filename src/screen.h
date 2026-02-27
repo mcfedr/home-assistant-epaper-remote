@@ -33,3 +33,4 @@ struct ButtonConfig {
 
 void screen_add_slider(SliderConfig config, Screen* screen);
 void screen_add_button(ButtonConfig config, Screen* screen);
+void screen_clear(Screen* screen);

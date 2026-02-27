@@ -16,7 +16,8 @@ enum class CommandType : uint8_t {
 };
 
 struct HomeAssistantEntity {
-    const char* entity_id;
+    char entity_id[MAX_ENTITY_ID_LEN];
+    char display_name[MAX_ENTITY_NAME_LEN];
     CommandType command_type;
     uint8_t current_value;
     uint8_t command_value;
@@ -35,9 +36,52 @@ enum class ConnState : uint8_t {
     Up,
 };
 
+struct Room {
+    char name[MAX_ROOM_NAME_LEN];
+    int8_t floor_idx;
+    uint8_t entity_ids[MAX_ENTITIES];
+    uint8_t entity_count;
+};
+
+struct Floor {
+    char name[MAX_FLOOR_NAME_LEN];
+};
+
+struct FloorListSnapshot {
+    uint8_t floor_count;
+    char floor_names[MAX_FLOORS][MAX_FLOOR_NAME_LEN];
+};
+
+struct RoomListSnapshot {
+    uint8_t room_count;
+    int8_t room_indices[MAX_ROOMS];
+    char floor_name[MAX_FLOOR_NAME_LEN];
+    char room_names[MAX_ROOMS][MAX_ROOM_NAME_LEN];
+};
+
+struct RoomControlsSnapshot {
+    char room_name[MAX_ROOM_NAME_LEN];
+    uint8_t entity_count;
+    uint8_t entity_ids[MAX_WIDGETS_PER_SCREEN];
+    char entity_names[MAX_WIDGETS_PER_SCREEN][MAX_ENTITY_NAME_LEN];
+    bool truncated;
+};
+
 struct EntityStore {
     ConnState wifi = ConnState::Initializing;
     ConnState home_assistant = ConnState::Initializing;
+
+    Floor floors[MAX_FLOORS];
+    uint8_t floor_count;
+    int8_t selected_floor = -1;
+    uint8_t floor_list_page = 0;
+
+    Room rooms[MAX_ROOMS];
+    uint8_t room_count;
+    int8_t selected_room = -1;
+    uint8_t room_list_page = 0;
+    bool rooms_loaded = false;
+    uint32_t rooms_revision = 0;
 
     HomeAssistantEntity entities[MAX_ENTITIES];
     uint8_t entity_count;
@@ -64,6 +108,20 @@ void store_update_value(EntityStore* store, uint8_t entity_idx, uint8_t value);
 void store_send_command(EntityStore* store, uint8_t entity_idx, uint8_t value);
 bool store_get_pending_command(EntityStore* store, Command* command);
 void store_ack_pending_command(EntityStore* store, const Command* command);
+void store_begin_room_sync(EntityStore* store);
+void store_finish_room_sync(EntityStore* store);
+int8_t store_add_floor(EntityStore* store, const char* floor_name);
+int8_t store_add_room(EntityStore* store, const char* room_name, int8_t floor_idx);
+int16_t store_find_room(EntityStore* store, const char* room_name);
+int8_t store_add_entity_to_room(EntityStore* store, uint8_t room_idx, EntityConfig entity, const char* display_name);
+bool store_select_floor(EntityStore* store, int8_t floor_idx);
+bool store_select_room(EntityStore* store, int8_t room_idx);
+bool store_shift_floor_list_page(EntityStore* store, int8_t delta);
+bool store_shift_room_list_page(EntityStore* store, int8_t delta);
+uint8_t store_get_room_count(EntityStore* store);
+void store_get_floor_list_snapshot(EntityStore* store, FloorListSnapshot* snapshot);
+bool store_get_room_list_snapshot(EntityStore* store, int8_t floor_idx, RoomListSnapshot* snapshot);
+bool store_get_room_controls_snapshot(EntityStore* store, int8_t room_idx, RoomControlsSnapshot* snapshot);
 void store_update_ui_state(EntityStore* store, const Screen* screen, UIState* ui_state);
 void store_wait_for_wifi_up(EntityStore* store);
 void store_flush_pending_commands(EntityStore* store);
