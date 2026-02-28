@@ -50,19 +50,7 @@ jobs:
       - name: Generate CI Config Stub
         run: |
           if [ ! -f src/config_remote.cpp ]; then
-            cat > src/config_remote.cpp <<'EOF'
-            #include "config_remote.h"
-
-            void configure_remote(Configuration* config, EntityStore* store, Screen* screen) {
-              (void)store;
-              config->wifi_ssid = "ci";
-              config->wifi_password = "ci";
-              config->home_assistant_url = "wss://example.invalid/api/websocket";
-              config->home_assistant_token = "ci";
-              config->root_ca = ISRG_ROOT_X1;
-              screen->widget_count = 0;
-            }
-            EOF
+            python -c 'from pathlib import Path; Path("src/config_remote.cpp").write_text("""#include \"config_remote.h\"\n\nvoid configure_remote(Configuration* config, EntityStore* store, Screen* screen) {\n  (void)store;\n  config->wifi_ssid = \"ci\";\n  config->wifi_password = \"ci\";\n  config->home_assistant_url = \"wss://example.invalid/api/websocket\";\n  config->home_assistant_token = \"ci\";\n  config->root_ca = ISRG_ROOT_X1;\n  screen->widget_count = 0;\n}\n""")'
           fi
 
       - name: Build
