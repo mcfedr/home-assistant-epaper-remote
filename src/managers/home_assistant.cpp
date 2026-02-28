@@ -12,6 +12,7 @@
 #include "store.h"
 #include <cJSON.h>
 #include <cctype>
+#include <ctime>
 #include <cstdlib>
 #include <cstring>
 
@@ -44,6 +45,21 @@ typedef struct home_assistant_context {
     int8_t entity_values[MAX_ENTITIES]; // brightness percentage or climate temp steps (-1 unknown)
     TickType_t last_command_sent_at_ms[MAX_ENTITIES];
 
+    // Standby data entity IDs
+    char standby_weather_entity_id[MAX_ENTITY_ID_LEN];
+    char standby_energy_solar_entity_id[MAX_ENTITY_ID_LEN];
+    char standby_energy_grid_entity_id[MAX_ENTITY_ID_LEN];
+    char standby_energy_battery_usage_entity_id[MAX_ENTITY_ID_LEN];
+    char standby_energy_battery_soc_entity_id[MAX_ENTITY_ID_LEN];
+    char standby_energy_house_entity_id[MAX_ENTITY_ID_LEN];
+    char standby_energy_grid_export_entity_id[MAX_ENTITY_ID_LEN];
+    char standby_energy_battery_charge_entity_id[MAX_ENTITY_ID_LEN];
+    uint16_t weather_forecast_request_id;
+    bool weather_forecast_requested;
+    uint32_t last_weather_forecast_request_ms;
+    uint16_t energy_prefs_request_id;
+    bool standby_energy_house_computed;
+
     // Mapping floor_id -> floor index in store
     uint8_t floor_count;
     char floor_ids[MAX_FLOORS][MAX_ENTITY_ID_LEN];
@@ -59,6 +75,13 @@ typedef struct home_assistant_context {
     uint16_t device_count;
     char device_ids[MAX_DEVICE_MAPPINGS][MAX_ENTITY_ID_LEN];
     int8_t device_room_indices[MAX_DEVICE_MAPPINGS];
+
+    struct StandbyEnergySeries {
+        uint8_t count;
+        char entity_ids[8][MAX_ENTITY_ID_LEN];
+        bool values_valid[8];
+        float values[8];
+    } standby_solar_series, standby_grid_in_series, standby_grid_out_series, standby_battery_out_series, standby_battery_in_series;
 } home_assistant_context_t;
 
 static const char* TAG = "home_assistant";
@@ -69,10 +92,12 @@ enum DiscoveryCommand : uint8_t {
     DiscoveryCommandRequestAreaRegistry = 2,
     DiscoveryCommandRequestDeviceRegistry = 3,
     DiscoveryCommandRequestEntityRegistry = 4,
-    DiscoveryCommandSubscribeEntities = 5,
+    DiscoveryCommandRequestEnergyPrefs = 5,
+    DiscoveryCommandSubscribeEntities = 6,
 };
 
 static void hass_dispatch_discovery_command(home_assistant_context_t* hass);
+void hass_cmd_request_energy_prefs(home_assistant_context_t* hass);
 void hass_cmd_subscribe(home_assistant_context_t* hass);
 
 static void copy_string(char* dst, size_t dst_len, const char* src) {
@@ -112,6 +137,219 @@ static const char* hass_entity_display_name_from_registry(cJSON* item) {
         return compact_name_item->valuestring;
     }
     return nullptr;
+}
+
+static bool has_entity_id(const char* entity_id) {
+    return entity_id && entity_id[0] != '\0';
+}
+
+static bool has_statistic_like_id(const char* statistic_id) {
+    return has_entity_id(statistic_id) && strchr(statistic_id, '.') != nullptr;
+}
+
+static void copy_optional_entity_id(char* dst, size_t dst_len, const char* src) {
+    if (has_entity_id(src)) {
+        copy_string(dst, dst_len, src);
+    } else {
+        dst[0] = '\0';
+    }
+}
+
+static bool parse_state_float(cJSON* state_item, float* out_value) {
+    if (cJSON_IsNumber(state_item)) {
+        *out_value = static_cast<float>(state_item->valuedouble);
+        return true;
+    }
+    if (!cJSON_IsString(state_item) || !state_item->valuestring) {
+        return false;
+    }
+
+    const char* value = state_item->valuestring;
+    if (strcmp(value, "unknown") == 0 || strcmp(value, "unavailable") == 0 || strcmp(value, "none") == 0 ||
+        strcmp(value, "None") == 0) {
+        return false;
+    }
+
+    char* end = nullptr;
+    float parsed = strtof(value, &end);
+    if (end == value || (end && *end != '\0')) {
+        return false;
+    }
+
+    *out_value = parsed;
+    return true;
+}
+
+static void standby_energy_series_reset(home_assistant_context_t::StandbyEnergySeries* series) {
+    if (!series) {
+        return;
+    }
+    series->count = 0;
+    memset(series->entity_ids, 0, sizeof(series->entity_ids));
+    memset(series->values_valid, 0, sizeof(series->values_valid));
+    memset(series->values, 0, sizeof(series->values));
+}
+
+static bool standby_energy_series_add_entity(home_assistant_context_t::StandbyEnergySeries* series, const char* entity_id) {
+    if (!series || !has_statistic_like_id(entity_id)) {
+        return false;
+    }
+
+    for (uint8_t idx = 0; idx < series->count; idx++) {
+        if (strcmp(series->entity_ids[idx], entity_id) == 0) {
+            return false;
+        }
+    }
+
+    const size_t max_count = sizeof(series->entity_ids) / sizeof(series->entity_ids[0]);
+    if (series->count >= max_count) {
+        return false;
+    }
+
+    copy_string(series->entity_ids[series->count], sizeof(series->entity_ids[series->count]), entity_id);
+    series->values_valid[series->count] = false;
+    series->values[series->count] = 0.0f;
+    series->count++;
+    return true;
+}
+
+static int8_t standby_energy_series_find(const home_assistant_context_t::StandbyEnergySeries* series, const char* entity_id) {
+    if (!series || !entity_id) {
+        return -1;
+    }
+
+    for (uint8_t idx = 0; idx < series->count; idx++) {
+        if (strcmp(series->entity_ids[idx], entity_id) == 0) {
+            return static_cast<int8_t>(idx);
+        }
+    }
+    return -1;
+}
+
+static bool standby_energy_series_set_value(home_assistant_context_t::StandbyEnergySeries* series, int8_t idx, bool valid, float value) {
+    if (!series || idx < 0 || static_cast<uint8_t>(idx) >= series->count) {
+        return false;
+    }
+
+    bool changed = false;
+    if (series->values_valid[idx] != valid) {
+        series->values_valid[idx] = valid;
+        changed = true;
+    }
+    if (valid && (series->values[idx] < value - 0.05f || series->values[idx] > value + 0.05f)) {
+        series->values[idx] = value;
+        changed = true;
+    }
+    return changed;
+}
+
+static bool standby_energy_series_total(const home_assistant_context_t::StandbyEnergySeries* series, float* total) {
+    if (!series || series->count == 0 || !total) {
+        return false;
+    }
+
+    float sum = 0.0f;
+    for (uint8_t idx = 0; idx < series->count; idx++) {
+        if (!series->values_valid[idx]) {
+            return false;
+        }
+        sum += series->values[idx];
+    }
+    *total = sum;
+    return true;
+}
+
+static void forecast_weekday_label_from_datetime(const char* datetime_text, char* out, size_t out_len) {
+    if (!out || out_len == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (!datetime_text || strlen(datetime_text) < 10) {
+        return;
+    }
+
+    int year = 0;
+    int month = 0;
+    int day = 0;
+    if (sscanf(datetime_text, "%d-%d-%d", &year, &month, &day) != 3) {
+        return;
+    }
+
+    tm date = {};
+    date.tm_year = year - 1900;
+    date.tm_mon = month - 1;
+    date.tm_mday = day;
+    date.tm_hour = 12;
+    if (mktime(&date) == static_cast<time_t>(-1)) {
+        return;
+    }
+
+    static const char* kWeekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const int weekday = date.tm_wday;
+    if (weekday < 0 || weekday > 6) {
+        return;
+    }
+    copy_string(out, out_len, kWeekdays[weekday]);
+}
+
+static bool parse_forecast_day(cJSON* day_item, StandbyForecastDay* out_day) {
+    if (!cJSON_IsObject(day_item) || !out_day) {
+        return false;
+    }
+
+    *out_day = {};
+    cJSON* datetime_item = cJSON_GetObjectItem(day_item, "datetime");
+    if (!cJSON_IsString(datetime_item)) {
+        datetime_item = cJSON_GetObjectItem(day_item, "date");
+    }
+    if (cJSON_IsString(datetime_item) && datetime_item->valuestring) {
+        forecast_weekday_label_from_datetime(datetime_item->valuestring, out_day->day_label, sizeof(out_day->day_label));
+    }
+
+    cJSON* condition_item = cJSON_GetObjectItem(day_item, "condition");
+    if (cJSON_IsString(condition_item) && condition_item->valuestring) {
+        copy_string(out_day->condition, sizeof(out_day->condition), condition_item->valuestring);
+    }
+
+    cJSON* high_item = cJSON_GetObjectItem(day_item, "temperature");
+    if (cJSON_IsNumber(high_item)) {
+        out_day->high_valid = true;
+        out_day->high_c = static_cast<float>(high_item->valuedouble);
+    }
+
+    cJSON* low_item = cJSON_GetObjectItem(day_item, "templow");
+    if (!cJSON_IsNumber(low_item)) {
+        low_item = cJSON_GetObjectItem(day_item, "temperature_low");
+    }
+    if (!cJSON_IsNumber(low_item)) {
+        low_item = cJSON_GetObjectItem(day_item, "low_temperature");
+    }
+    if (cJSON_IsNumber(low_item)) {
+        out_day->low_valid = true;
+        out_day->low_c = static_cast<float>(low_item->valuedouble);
+    }
+
+    return out_day->condition[0] != '\0' || out_day->high_valid || out_day->low_valid;
+}
+
+static uint8_t parse_forecast_days(cJSON* forecast_array, StandbyForecastDay* days, uint8_t max_days) {
+    if (!cJSON_IsArray(forecast_array) || !days || max_days == 0) {
+        return 0;
+    }
+
+    uint8_t day_count = 0;
+    cJSON* day_item = nullptr;
+    cJSON_ArrayForEach(day_item, forecast_array) {
+        if (day_count >= max_days) {
+            break;
+        }
+        StandbyForecastDay parsed_day = {};
+        if (!parse_forecast_day(day_item, &parsed_day)) {
+            continue;
+        }
+        days[day_count++] = parsed_day;
+    }
+    return day_count;
 }
 
 static bool contains_case_insensitive(const char* haystack, const char* needle) {
@@ -193,6 +431,31 @@ static void hass_reset_discovery_state(home_assistant_context_t* hass) {
     memset(hass->entity_modes, 0, sizeof(hass->entity_modes));
     memset(hass->entity_values, -1, sizeof(hass->entity_values));
     memset(hass->last_command_sent_at_ms, 0, sizeof(hass->last_command_sent_at_ms));
+    copy_optional_entity_id(hass->standby_weather_entity_id, sizeof(hass->standby_weather_entity_id), hass->config->weather_entity_id);
+    copy_optional_entity_id(hass->standby_energy_solar_entity_id, sizeof(hass->standby_energy_solar_entity_id),
+                            hass->config->energy_solar_entity_id);
+    copy_optional_entity_id(hass->standby_energy_grid_entity_id, sizeof(hass->standby_energy_grid_entity_id), hass->config->energy_grid_entity_id);
+    copy_optional_entity_id(hass->standby_energy_battery_usage_entity_id, sizeof(hass->standby_energy_battery_usage_entity_id),
+                            hass->config->energy_battery_usage_entity_id);
+    copy_optional_entity_id(hass->standby_energy_battery_soc_entity_id, sizeof(hass->standby_energy_battery_soc_entity_id),
+                            hass->config->energy_battery_soc_entity_id);
+    copy_optional_entity_id(hass->standby_energy_house_entity_id, sizeof(hass->standby_energy_house_entity_id),
+                            hass->config->energy_house_entity_id);
+    hass->standby_energy_grid_export_entity_id[0] = '\0';
+    hass->standby_energy_battery_charge_entity_id[0] = '\0';
+    hass->energy_prefs_request_id = 0;
+    hass->standby_energy_house_computed = false;
+    standby_energy_series_reset(&hass->standby_solar_series);
+    standby_energy_series_reset(&hass->standby_grid_in_series);
+    standby_energy_series_reset(&hass->standby_grid_out_series);
+    standby_energy_series_reset(&hass->standby_battery_out_series);
+    standby_energy_series_reset(&hass->standby_battery_in_series);
+    standby_energy_series_add_entity(&hass->standby_solar_series, hass->standby_energy_solar_entity_id);
+    standby_energy_series_add_entity(&hass->standby_grid_in_series, hass->standby_energy_grid_entity_id);
+    standby_energy_series_add_entity(&hass->standby_battery_out_series, hass->standby_energy_battery_usage_entity_id);
+    hass->weather_forecast_request_id = 0;
+    hass->weather_forecast_requested = false;
+    hass->last_weather_forecast_request_ms = 0;
     xSemaphoreGive(hass->mutex);
 }
 
@@ -346,6 +609,9 @@ static void hass_dispatch_discovery_command(home_assistant_context_t* hass) {
     case DiscoveryCommandRequestEntityRegistry:
         hass_cmd_request_entity_registry(hass);
         break;
+    case DiscoveryCommandRequestEnergyPrefs:
+        hass_cmd_request_energy_prefs(hass);
+        break;
     case DiscoveryCommandSubscribeEntities:
         hass_cmd_subscribe(hass);
         break;
@@ -355,15 +621,188 @@ static void hass_dispatch_discovery_command(home_assistant_context_t* hass) {
     }
 }
 
+static bool entity_id_already_added(const char* entity_id, const char* const* list, uint8_t list_count) {
+    for (uint8_t i = 0; i < list_count; i++) {
+        if (strcmp(list[i], entity_id) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void hass_cmd_request_weather_forecast(home_assistant_context_t* hass) {
+    char weather_entity_id[MAX_ENTITY_ID_LEN] = {};
+    uint16_t request_id = 0;
+
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    if (!has_entity_id(hass->standby_weather_entity_id)) {
+        xSemaphoreGive(hass->mutex);
+        return;
+    }
+    if (hass->weather_forecast_requested) {
+        xSemaphoreGive(hass->mutex);
+        return;
+    }
+
+    copy_string(weather_entity_id, sizeof(weather_entity_id), hass->standby_weather_entity_id);
+    request_id = hass->event_id++;
+    hass->weather_forecast_request_id = request_id;
+    hass->weather_forecast_requested = true;
+    hass->last_weather_forecast_request_ms = static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    xSemaphoreGive(hass->mutex);
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "id", request_id);
+    cJSON_AddStringToObject(root, "type", "call_service");
+    cJSON_AddStringToObject(root, "domain", "weather");
+    cJSON_AddStringToObject(root, "service", "get_forecasts");
+    cJSON_AddBoolToObject(root, "return_response", true);
+
+    cJSON* service_data = cJSON_CreateObject();
+    cJSON_AddStringToObject(service_data, "type", "daily");
+    cJSON_AddStringToObject(service_data, "entity_id", weather_entity_id);
+    cJSON_AddItemToObject(root, "service_data", service_data);
+
+    cJSON* target = cJSON_CreateObject();
+    cJSON_AddStringToObject(target, "entity_id", weather_entity_id);
+    cJSON_AddItemToObject(root, "target", target);
+
+    char* request = cJSON_PrintUnformatted(root);
+    ESP_LOGI(TAG, "Requesting weather forecast for %s", weather_entity_id);
+    esp_websocket_client_send_text(hass->client, request, strlen(request), portMAX_DELAY);
+    cJSON_free(request);
+    cJSON_Delete(root);
+}
+
+void hass_cmd_request_energy_prefs(home_assistant_context_t* hass) {
+    cJSON* root = cJSON_CreateObject();
+    uint16_t request_id = hass_generate_event_id(hass);
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    hass->energy_prefs_request_id = request_id;
+    xSemaphoreGive(hass->mutex);
+
+    cJSON_AddNumberToObject(root, "id", request_id);
+    cJSON_AddStringToObject(root, "type", "energy/get_prefs");
+
+    char* request = cJSON_PrintUnformatted(root);
+    ESP_LOGI(TAG, "Requesting energy preferences from Home Assistant");
+    esp_websocket_client_send_text(hass->client, request, strlen(request), portMAX_DELAY);
+    cJSON_free(request);
+    cJSON_Delete(root);
+}
+
+static void hass_add_standby_entity_id(cJSON* entity_ids,
+                                       const char* entity_id,
+                                       const char** added_ids,
+                                       size_t max_added_ids,
+                                       uint16_t* added_id_count) {
+    if (!has_entity_id(entity_id) || !added_id_count) {
+        return;
+    }
+    if (*added_id_count >= max_added_ids) {
+        return;
+    }
+    if (entity_id_already_added(entity_id, added_ids, static_cast<uint8_t>(*added_id_count))) {
+        return;
+    }
+
+    cJSON_AddItemToArray(entity_ids, cJSON_CreateString(entity_id));
+    ESP_LOGI(TAG, "Subscribing standby entity %s", entity_id);
+    added_ids[*added_id_count] = entity_id;
+    (*added_id_count)++;
+}
+
+static void hass_add_standby_series_ids(cJSON* entity_ids,
+                                        const home_assistant_context_t::StandbyEnergySeries* series,
+                                        const char** added_ids,
+                                        size_t max_added_ids,
+                                        uint16_t* added_id_count) {
+    if (!series || !added_id_count) {
+        return;
+    }
+    for (uint8_t idx = 0; idx < series->count; idx++) {
+        hass_add_standby_entity_id(entity_ids, series->entity_ids[idx], added_ids, max_added_ids, added_id_count);
+    }
+}
+
+static void hass_update_standby_energy_metrics(home_assistant_context_t* hass) {
+    bool solar_valid = false;
+    bool grid_in_valid = false;
+    bool battery_out_valid = false;
+    bool grid_out_valid = false;
+    bool battery_in_valid = false;
+    float solar_value = 0.0f;
+    float grid_in_value = 0.0f;
+    float battery_out_value = 0.0f;
+    float grid_out_value = 0.0f;
+    float battery_in_value = 0.0f;
+    bool house_computed = false;
+
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    solar_valid = standby_energy_series_total(&hass->standby_solar_series, &solar_value);
+    grid_in_valid = standby_energy_series_total(&hass->standby_grid_in_series, &grid_in_value);
+    battery_out_valid = standby_energy_series_total(&hass->standby_battery_out_series, &battery_out_value);
+    grid_out_valid = standby_energy_series_total(&hass->standby_grid_out_series, &grid_out_value);
+    battery_in_valid = standby_energy_series_total(&hass->standby_battery_in_series, &battery_in_value);
+    house_computed = hass->standby_energy_house_computed;
+    xSemaphoreGive(hass->mutex);
+
+    store_set_standby_energy_metric(hass->store, StandbyEnergyMetric::SolarGeneration, solar_valid, solar_value);
+    store_set_standby_energy_metric(hass->store, StandbyEnergyMetric::GridInput, grid_in_valid, grid_in_value);
+    store_set_standby_energy_metric(hass->store, StandbyEnergyMetric::GridExport, grid_out_valid, grid_out_value);
+    store_set_standby_energy_metric(hass->store, StandbyEnergyMetric::BatteryUsage, battery_out_valid, battery_out_value);
+    store_set_standby_energy_metric(hass->store, StandbyEnergyMetric::BatteryChargeEnergy, battery_in_valid, battery_in_value);
+
+    if (house_computed) {
+        bool house_valid = false;
+        float house_value = 0.0f;
+        if (solar_valid) {
+            house_value += solar_value;
+            house_valid = true;
+        }
+        if (grid_in_valid) {
+            house_value += grid_in_value;
+            house_valid = true;
+        }
+        if (battery_out_valid) {
+            house_value += battery_out_value;
+            house_valid = true;
+        }
+        if (grid_out_valid) {
+            house_value -= grid_out_value;
+        }
+        if (battery_in_valid) {
+            house_value -= battery_in_value;
+        }
+        if (house_valid && house_value < 0.0f) {
+            house_value = 0.0f;
+        }
+        store_set_standby_energy_metric(hass->store, StandbyEnergyMetric::HouseUsage, house_valid, house_value);
+    }
+}
+
 void hass_cmd_subscribe(home_assistant_context_t* hass) {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "id", hass_generate_event_id(hass));
     cJSON_AddStringToObject(root, "type", "subscribe_entities");
 
     cJSON* entity_ids = cJSON_CreateArray();
+    constexpr size_t max_added_ids = MAX_ENTITIES + 48;
+    const char* added_ids[max_added_ids] = {};
+    uint16_t added_id_count = 0;
     xSemaphoreTake(hass->mutex, portMAX_DELAY);
     for (uint8_t idx = 0; idx < hass->entity_count; idx++) {
-        cJSON_AddItemToArray(entity_ids, cJSON_CreateString(hass->entity_ids[idx]));
+        hass_add_standby_entity_id(entity_ids, hass->entity_ids[idx], added_ids, max_added_ids, &added_id_count);
+    }
+    hass_add_standby_entity_id(entity_ids, hass->standby_weather_entity_id, added_ids, max_added_ids, &added_id_count);
+    hass_add_standby_series_ids(entity_ids, &hass->standby_solar_series, added_ids, max_added_ids, &added_id_count);
+    hass_add_standby_series_ids(entity_ids, &hass->standby_grid_in_series, added_ids, max_added_ids, &added_id_count);
+    hass_add_standby_series_ids(entity_ids, &hass->standby_grid_out_series, added_ids, max_added_ids, &added_id_count);
+    hass_add_standby_series_ids(entity_ids, &hass->standby_battery_out_series, added_ids, max_added_ids, &added_id_count);
+    hass_add_standby_series_ids(entity_ids, &hass->standby_battery_in_series, added_ids, max_added_ids, &added_id_count);
+    hass_add_standby_entity_id(entity_ids, hass->standby_energy_battery_soc_entity_id, added_ids, max_added_ids, &added_id_count);
+    if (!hass->standby_energy_house_computed) {
+        hass_add_standby_entity_id(entity_ids, hass->standby_energy_house_entity_id, added_ids, max_added_ids, &added_id_count);
     }
     xSemaphoreGive(hass->mutex);
     cJSON_AddItemToObject(root, "entity_ids", entity_ids);
@@ -373,6 +812,8 @@ void hass_cmd_subscribe(home_assistant_context_t* hass) {
     esp_websocket_client_send_text(hass->client, request, strlen(request), portMAX_DELAY);
     cJSON_free(request);
     cJSON_Delete(root);
+
+    hass_cmd_request_weather_forecast(hass);
 }
 
 int16_t hass_match_entity(home_assistant_context_t* hass, const char* key) {
@@ -449,6 +890,317 @@ int16_t hass_find_room_for_device(home_assistant_context_t* hass, const char* de
     }
     xSemaphoreGive(hass->mutex);
     return room_idx;
+}
+
+static void hass_parse_weather_entity_update(home_assistant_context_t* hass, cJSON* item) {
+    const char* condition = "";
+    bool has_temperature = false;
+    float temperature_c = 0.0f;
+
+    cJSON* state = cJSON_GetObjectItem(item, "s");
+    if (cJSON_IsString(state) && state->valuestring) {
+        condition = state->valuestring;
+    }
+
+    cJSON* attributes = cJSON_GetObjectItem(item, "a");
+    if (cJSON_IsObject(attributes)) {
+        cJSON* temperature = cJSON_GetObjectItem(attributes, "temperature");
+        if (cJSON_IsNumber(temperature)) {
+            has_temperature = true;
+            temperature_c = static_cast<float>(temperature->valuedouble);
+        }
+
+        cJSON* forecast = cJSON_GetObjectItem(attributes, "forecast");
+        StandbyForecastDay forecast_days[MAX_STANDBY_FORECAST_DAYS] = {};
+        uint8_t day_count = parse_forecast_days(forecast, forecast_days, MAX_STANDBY_FORECAST_DAYS);
+        if (day_count > 0) {
+            store_set_standby_forecast(hass->store, forecast_days, day_count);
+        }
+    }
+
+    store_set_standby_weather(hass->store, condition, has_temperature, temperature_c);
+}
+
+static void hass_parse_standby_entity_update(home_assistant_context_t* hass, const char* entity_id, cJSON* item) {
+    if (!entity_id || !item || !cJSON_IsObject(item)) {
+        return;
+    }
+
+    bool is_weather = false;
+    bool is_battery_soc = false;
+    bool is_house_direct = false;
+    bool house_computed = false;
+    bool series_changed = false;
+    int8_t solar_idx = -1;
+    int8_t grid_in_idx = -1;
+    int8_t grid_out_idx = -1;
+    int8_t battery_out_idx = -1;
+    int8_t battery_in_idx = -1;
+
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    is_weather = has_entity_id(hass->standby_weather_entity_id) && strcmp(entity_id, hass->standby_weather_entity_id) == 0;
+    is_battery_soc = has_entity_id(hass->standby_energy_battery_soc_entity_id) && strcmp(entity_id, hass->standby_energy_battery_soc_entity_id) == 0;
+    is_house_direct = has_entity_id(hass->standby_energy_house_entity_id) && strcmp(entity_id, hass->standby_energy_house_entity_id) == 0;
+    house_computed = hass->standby_energy_house_computed;
+    solar_idx = standby_energy_series_find(&hass->standby_solar_series, entity_id);
+    grid_in_idx = standby_energy_series_find(&hass->standby_grid_in_series, entity_id);
+    grid_out_idx = standby_energy_series_find(&hass->standby_grid_out_series, entity_id);
+    battery_out_idx = standby_energy_series_find(&hass->standby_battery_out_series, entity_id);
+    battery_in_idx = standby_energy_series_find(&hass->standby_battery_in_series, entity_id);
+    xSemaphoreGive(hass->mutex);
+
+    if (is_weather) {
+        hass_parse_weather_entity_update(hass, item);
+        return;
+    }
+
+    float value = 0.0f;
+    bool valid = parse_state_float(cJSON_GetObjectItem(item, "s"), &value);
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    if (solar_idx >= 0) {
+        series_changed = standby_energy_series_set_value(&hass->standby_solar_series, solar_idx, valid, value) || series_changed;
+    }
+    if (grid_in_idx >= 0) {
+        series_changed = standby_energy_series_set_value(&hass->standby_grid_in_series, grid_in_idx, valid, value) || series_changed;
+    }
+    if (grid_out_idx >= 0) {
+        series_changed = standby_energy_series_set_value(&hass->standby_grid_out_series, grid_out_idx, valid, value) || series_changed;
+    }
+    if (battery_out_idx >= 0) {
+        series_changed = standby_energy_series_set_value(&hass->standby_battery_out_series, battery_out_idx, valid, value) || series_changed;
+    }
+    if (battery_in_idx >= 0) {
+        series_changed = standby_energy_series_set_value(&hass->standby_battery_in_series, battery_in_idx, valid, value) || series_changed;
+    }
+    xSemaphoreGive(hass->mutex);
+
+    if (series_changed) {
+        hass_update_standby_energy_metrics(hass);
+    }
+
+    if (is_battery_soc) {
+        store_set_standby_energy_metric(hass->store, StandbyEnergyMetric::BatteryCharge, valid, value);
+    } else if (is_house_direct && !house_computed) {
+        store_set_standby_energy_metric(hass->store, StandbyEnergyMetric::HouseUsage, valid, value);
+    }
+}
+
+static void hass_parse_weather_forecast_result(home_assistant_context_t* hass, cJSON* result_item) {
+    if (!cJSON_IsObject(result_item)) {
+        return;
+    }
+
+    char weather_entity_id[MAX_ENTITY_ID_LEN] = {};
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    copy_string(weather_entity_id, sizeof(weather_entity_id), hass->standby_weather_entity_id);
+    xSemaphoreGive(hass->mutex);
+    if (!has_entity_id(weather_entity_id)) {
+        return;
+    }
+
+    cJSON* forecast_array = nullptr;
+    cJSON* response = cJSON_GetObjectItem(result_item, "response");
+    if (cJSON_IsObject(response)) {
+        cJSON* weather_result = cJSON_GetObjectItem(response, weather_entity_id);
+        if (cJSON_IsObject(weather_result)) {
+            forecast_array = cJSON_GetObjectItem(weather_result, "forecast");
+        }
+
+        if (!cJSON_IsArray(forecast_array)) {
+            cJSON* response_item = nullptr;
+            cJSON_ArrayForEach(response_item, response) {
+                if (!cJSON_IsObject(response_item)) {
+                    continue;
+                }
+                cJSON* candidate = cJSON_GetObjectItem(response_item, "forecast");
+                if (cJSON_IsArray(candidate)) {
+                    forecast_array = candidate;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!cJSON_IsArray(forecast_array)) {
+        cJSON* direct_forecast = cJSON_GetObjectItem(result_item, "forecast");
+        if (cJSON_IsArray(direct_forecast)) {
+            forecast_array = direct_forecast;
+        }
+    }
+
+    StandbyForecastDay forecast_days[MAX_STANDBY_FORECAST_DAYS] = {};
+    uint8_t day_count = parse_forecast_days(forecast_array, forecast_days, MAX_STANDBY_FORECAST_DAYS);
+    if (day_count > 0) {
+        store_set_standby_forecast(hass->store, forecast_days, day_count);
+    }
+}
+
+static void hass_energy_add_stat_from_key(home_assistant_context_t::StandbyEnergySeries* series, cJSON* object, const char* key) {
+    if (!series || !cJSON_IsObject(object)) {
+        return;
+    }
+    cJSON* item = cJSON_GetObjectItem(object, key);
+    if (cJSON_IsString(item) && item->valuestring) {
+        standby_energy_series_add_entity(series, item->valuestring);
+    }
+}
+
+static void hass_energy_add_grid_legacy_flow(home_assistant_context_t::StandbyEnergySeries* series, cJSON* source, const char* flow_key, const char* key) {
+    cJSON* flow_array = cJSON_GetObjectItem(source, flow_key);
+    if (!cJSON_IsArray(flow_array)) {
+        return;
+    }
+
+    cJSON* flow_item = nullptr;
+    cJSON_ArrayForEach(flow_item, flow_array) {
+        hass_energy_add_stat_from_key(series, flow_item, key);
+    }
+}
+
+static void hass_apply_energy_preferences(home_assistant_context_t* hass,
+                                          const home_assistant_context_t::StandbyEnergySeries* solar_series,
+                                          const home_assistant_context_t::StandbyEnergySeries* grid_in_series,
+                                          const home_assistant_context_t::StandbyEnergySeries* grid_out_series,
+                                          const home_assistant_context_t::StandbyEnergySeries* battery_out_series,
+                                          const home_assistant_context_t::StandbyEnergySeries* battery_in_series) {
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    hass->standby_solar_series = *solar_series;
+    hass->standby_grid_in_series = *grid_in_series;
+    hass->standby_grid_out_series = *grid_out_series;
+    hass->standby_battery_out_series = *battery_out_series;
+    hass->standby_battery_in_series = *battery_in_series;
+
+    const bool has_discovered_sources = hass->standby_solar_series.count > 0 || hass->standby_grid_in_series.count > 0 ||
+                                        hass->standby_grid_out_series.count > 0 || hass->standby_battery_out_series.count > 0 ||
+                                        hass->standby_battery_in_series.count > 0;
+    hass->standby_energy_house_computed = has_discovered_sources;
+
+    if (hass->standby_solar_series.count > 0) {
+        copy_string(hass->standby_energy_solar_entity_id, sizeof(hass->standby_energy_solar_entity_id), hass->standby_solar_series.entity_ids[0]);
+    }
+    if (hass->standby_grid_in_series.count > 0) {
+        copy_string(hass->standby_energy_grid_entity_id, sizeof(hass->standby_energy_grid_entity_id), hass->standby_grid_in_series.entity_ids[0]);
+    }
+    if (hass->standby_battery_out_series.count > 0) {
+        copy_string(hass->standby_energy_battery_usage_entity_id, sizeof(hass->standby_energy_battery_usage_entity_id),
+                    hass->standby_battery_out_series.entity_ids[0]);
+    }
+    if (hass->standby_grid_out_series.count > 0) {
+        copy_string(hass->standby_energy_grid_export_entity_id, sizeof(hass->standby_energy_grid_export_entity_id),
+                    hass->standby_grid_out_series.entity_ids[0]);
+    } else {
+        hass->standby_energy_grid_export_entity_id[0] = '\0';
+    }
+    if (hass->standby_battery_in_series.count > 0) {
+        copy_string(hass->standby_energy_battery_charge_entity_id, sizeof(hass->standby_energy_battery_charge_entity_id),
+                    hass->standby_battery_in_series.entity_ids[0]);
+    } else {
+        hass->standby_energy_battery_charge_entity_id[0] = '\0';
+    }
+    xSemaphoreGive(hass->mutex);
+
+    if (solar_series->count > 0) {
+        ESP_LOGI(TAG, "Energy source (solar): %s", solar_series->entity_ids[0]);
+    }
+    if (grid_in_series->count > 0) {
+        ESP_LOGI(TAG, "Energy source (grid in): %s", grid_in_series->entity_ids[0]);
+    }
+    if (grid_out_series->count > 0) {
+        ESP_LOGI(TAG, "Energy source (grid out): %s", grid_out_series->entity_ids[0]);
+    }
+    if (battery_out_series->count > 0) {
+        ESP_LOGI(TAG, "Energy source (battery out): %s", battery_out_series->entity_ids[0]);
+    }
+    if (battery_in_series->count > 0) {
+        ESP_LOGI(TAG, "Energy source (battery in): %s", battery_in_series->entity_ids[0]);
+    }
+
+    hass_update_standby_energy_metrics(hass);
+}
+
+static void hass_parse_energy_preferences_result(home_assistant_context_t* hass, cJSON* result_item) {
+    if (!cJSON_IsObject(result_item)) {
+        return;
+    }
+
+    cJSON* energy_sources = cJSON_GetObjectItem(result_item, "energy_sources");
+    if (!cJSON_IsArray(energy_sources)) {
+        ESP_LOGW(TAG, "Energy preferences response has no energy_sources array");
+        return;
+    }
+
+    auto* solar_series = static_cast<home_assistant_context_t::StandbyEnergySeries*>(malloc(sizeof(home_assistant_context_t::StandbyEnergySeries)));
+    auto* grid_in_series =
+        static_cast<home_assistant_context_t::StandbyEnergySeries*>(malloc(sizeof(home_assistant_context_t::StandbyEnergySeries)));
+    auto* grid_out_series =
+        static_cast<home_assistant_context_t::StandbyEnergySeries*>(malloc(sizeof(home_assistant_context_t::StandbyEnergySeries)));
+    auto* battery_out_series =
+        static_cast<home_assistant_context_t::StandbyEnergySeries*>(malloc(sizeof(home_assistant_context_t::StandbyEnergySeries)));
+    auto* battery_in_series =
+        static_cast<home_assistant_context_t::StandbyEnergySeries*>(malloc(sizeof(home_assistant_context_t::StandbyEnergySeries)));
+    if (!solar_series || !grid_in_series || !grid_out_series || !battery_out_series || !battery_in_series) {
+        free(solar_series);
+        free(grid_in_series);
+        free(grid_out_series);
+        free(battery_out_series);
+        free(battery_in_series);
+        ESP_LOGW(TAG, "Insufficient memory to parse energy preferences");
+        return;
+    }
+
+    standby_energy_series_reset(solar_series);
+    standby_energy_series_reset(grid_in_series);
+    standby_energy_series_reset(grid_out_series);
+    standby_energy_series_reset(battery_out_series);
+    standby_energy_series_reset(battery_in_series);
+
+    cJSON* source = nullptr;
+    cJSON_ArrayForEach(source, energy_sources) {
+        if (!cJSON_IsObject(source)) {
+            continue;
+        }
+        cJSON* type_item = cJSON_GetObjectItem(source, "type");
+        if (!cJSON_IsString(type_item) || !type_item->valuestring) {
+            continue;
+        }
+
+        const char* source_type = type_item->valuestring;
+        if (strcmp(source_type, "solar") == 0) {
+            hass_energy_add_stat_from_key(solar_series, source, "stat_energy_from");
+            continue;
+        }
+        if (strcmp(source_type, "battery") == 0) {
+            hass_energy_add_stat_from_key(battery_out_series, source, "stat_energy_from");
+            hass_energy_add_stat_from_key(battery_in_series, source, "stat_energy_to");
+            continue;
+        }
+        if (strcmp(source_type, "grid") == 0) {
+            // New unified format.
+            hass_energy_add_stat_from_key(grid_in_series, source, "stat_energy_from");
+            hass_energy_add_stat_from_key(grid_out_series, source, "stat_energy_to");
+            // Legacy format still appears in older setups.
+            hass_energy_add_grid_legacy_flow(grid_in_series, source, "flow_from", "stat_energy_from");
+            hass_energy_add_grid_legacy_flow(grid_out_series, source, "flow_to", "stat_energy_to");
+        }
+    }
+
+    if (solar_series->count == 0 && grid_in_series->count == 0 && grid_out_series->count == 0 && battery_out_series->count == 0 &&
+        battery_in_series->count == 0) {
+        ESP_LOGW(TAG, "No usable energy entities discovered from energy/get_prefs");
+        free(solar_series);
+        free(grid_in_series);
+        free(grid_out_series);
+        free(battery_out_series);
+        free(battery_in_series);
+        return;
+    }
+
+    hass_apply_energy_preferences(hass, solar_series, grid_in_series, grid_out_series, battery_out_series, battery_in_series);
+    free(solar_series);
+    free(grid_in_series);
+    free(grid_out_series);
+    free(battery_out_series);
+    free(battery_in_series);
 }
 
 void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx, cJSON* item) {
@@ -630,6 +1382,7 @@ void hass_handle_entity_update(home_assistant_context_t* hass, cJSON* event) {
                 ESP_LOGI(TAG, "Found initial value for widget %d (%s)", entity_id, item->string);
                 hass_parse_entity_update(hass, entity_id, item);
             }
+            hass_parse_standby_entity_update(hass, item->string, item);
         }
     }
 
@@ -644,6 +1397,10 @@ void hass_handle_entity_update(home_assistant_context_t* hass, cJSON* event) {
                     ESP_LOGI(TAG, "Found update for widget %d (%s)", entity_id, item->string);
                     hass_parse_entity_update(hass, entity_id, plus_value);
                 }
+            }
+            cJSON* plus_value = cJSON_GetObjectItem(item, "+");
+            if (cJSON_IsObject(plus_value)) {
+                hass_parse_standby_entity_update(hass, item->string, plus_value);
             }
         }
     }
@@ -806,6 +1563,14 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
         }
 
         const char* display_name = hass_entity_display_name_from_registry(item);
+        if (strncmp(entity_id_item->valuestring, "weather.", 8) == 0) {
+            xSemaphoreTake(hass->mutex, portMAX_DELAY);
+            if (!has_entity_id(hass->standby_weather_entity_id)) {
+                copy_string(hass->standby_weather_entity_id, sizeof(hass->standby_weather_entity_id), entity_id_item->valuestring);
+                ESP_LOGI(TAG, "Auto-selected weather entity %s for standby screen", hass->standby_weather_entity_id);
+            }
+            xSemaphoreGive(hass->mutex);
+        }
 
         CommandType command_type;
         if (strncmp(entity_id_item->valuestring, "light.", 6) == 0) {
@@ -865,12 +1630,39 @@ void hass_handle_result(home_assistant_context_t* hass, cJSON* json) {
     uint16_t area_request_id = 0;
     uint16_t device_request_id = 0;
     uint16_t entity_request_id = 0;
+    uint16_t weather_forecast_request_id = 0;
+    uint16_t energy_prefs_request_id = 0;
     xSemaphoreTake(hass->mutex, portMAX_DELAY);
     floor_request_id = hass->floor_registry_request_id;
     area_request_id = hass->area_registry_request_id;
     device_request_id = hass->device_registry_request_id;
     entity_request_id = hass->entity_registry_request_id;
+    weather_forecast_request_id = hass->weather_forecast_request_id;
+    energy_prefs_request_id = hass->energy_prefs_request_id;
     xSemaphoreGive(hass->mutex);
+
+    if (response_id == weather_forecast_request_id) {
+        xSemaphoreTake(hass->mutex, portMAX_DELAY);
+        hass->weather_forecast_requested = false;
+        hass->weather_forecast_request_id = 0;
+        xSemaphoreGive(hass->mutex);
+        if (!success) {
+            ESP_LOGW(TAG, "Weather forecast request failed");
+        } else {
+            hass_parse_weather_forecast_result(hass, result_item);
+        }
+        return;
+    }
+
+    if (response_id == energy_prefs_request_id) {
+        if (!success) {
+            ESP_LOGW(TAG, "Energy preferences request failed, keeping configured standby entities");
+        } else {
+            hass_parse_energy_preferences_result(hass, result_item);
+        }
+        hass_set_pending_discovery_command(hass, DiscoveryCommandSubscribeEntities);
+        return;
+    }
 
     if (response_id == floor_request_id) {
         if (!success) {
@@ -914,16 +1706,13 @@ void hass_handle_result(home_assistant_context_t* hass, cJSON* json) {
         hass_parse_entity_registry(hass, result_item);
         hass_refresh_entities_from_store(hass);
         store_finish_room_sync(hass->store);
-
         xSemaphoreTake(hass->mutex, portMAX_DELAY);
-        uint8_t entity_count = hass->entity_count;
+        const uint8_t entity_count = hass->entity_count;
         xSemaphoreGive(hass->mutex);
-        if (entity_count > 0) {
-            hass_set_pending_discovery_command(hass, DiscoveryCommandSubscribeEntities);
-        } else {
+        if (entity_count == 0) {
             ESP_LOGW(TAG, "No light/climate/cover entities discovered for mapped rooms");
-            hass_update_state(hass, ConnState::Up);
         }
+        hass_set_pending_discovery_command(hass, DiscoveryCommandRequestEnergyPrefs);
         return;
     }
 }
@@ -1156,7 +1945,7 @@ void home_assistant_task(void* arg) {
     Command command;
     bool previous_connect_failed = false;
     while (1) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
 
         xSemaphoreTake(hass->mutex, portMAX_DELAY);
         ConnState state = hass->state;
@@ -1192,6 +1981,19 @@ void home_assistant_task(void* arg) {
 
         if (state == ConnState::Up) {
             previous_connect_failed = false;
+            const uint32_t now_ms = static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
+            const bool standby_active = store_is_standby_active(store);
+            bool weather_forecast_requested = false;
+            uint32_t last_weather_forecast_request_ms = 0;
+            xSemaphoreTake(hass->mutex, portMAX_DELAY);
+            weather_forecast_requested = hass->weather_forecast_requested;
+            last_weather_forecast_request_ms = hass->last_weather_forecast_request_ms;
+            xSemaphoreGive(hass->mutex);
+            if (standby_active && !weather_forecast_requested &&
+                (last_weather_forecast_request_ms == 0 ||
+                 static_cast<uint32_t>(now_ms - last_weather_forecast_request_ms) >= STANDBY_REFRESH_INTERVAL_MS)) {
+                hass_cmd_request_weather_forecast(hass);
+            }
             while (store_get_pending_command(store, &command)) {
                 hass_send_command(hass, &command);
                 store_ack_pending_command(store, &command);

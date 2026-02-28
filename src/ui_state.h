@@ -15,6 +15,10 @@ enum class UiMode : uint8_t {
     FloorList,
     RoomList,
     RoomControls,
+    Standby,
+    SettingsMenu,
+    WifiSettings,
+    WifiPassword,
 };
 
 struct UIState {
@@ -25,6 +29,9 @@ struct UIState {
     uint8_t room_list_page = 0;
     uint8_t room_controls_page = 0;
     uint32_t rooms_revision = 0;
+    uint8_t wifi_list_page = 0;
+    uint32_t settings_revision = 0;
+    uint32_t standby_revision = 0;
     uint8_t widget_values[MAX_WIDGETS_PER_SCREEN] = {};
 };
 

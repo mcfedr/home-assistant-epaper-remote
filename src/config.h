@@ -7,6 +7,14 @@ struct Configuration {
     const char* home_assistant_url;
     const char* home_assistant_token;
     const char* root_ca;
+
+    // Standby screen data sources
+    const char* weather_entity_id;
+    const char* energy_solar_entity_id;
+    const char* energy_grid_entity_id;
+    const char* energy_battery_usage_entity_id;
+    const char* energy_battery_soc_entity_id;
+    const char* energy_house_entity_id;
 };
 
 constexpr const char* ISRG_ROOT_X1 = ( // LetsEncrypt CA

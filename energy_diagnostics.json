@@ -1,0 +1,769 @@
+{
+  "version": "2026.2.1",
+  "info": {
+    "cost_sensors": {},
+    "solar_forecast_domains": [
+      "solcast_solar"
+    ]
+  },
+  "preferences": {
+    "energy_sources": [
+      {
+        "type": "grid",
+        "flow_from": [
+          {
+            "stat_energy_from": "sensor.solarman_total_energy_import",
+            "stat_cost": null,
+            "entity_energy_price": null,
+            "number_energy_price": null
+          }
+        ],
+        "flow_to": [
+          {
+            "stat_energy_to": "sensor.solarman_total_energy_export",
+            "stat_compensation": null,
+            "entity_energy_price": null,
+            "number_energy_price": null
+          }
+        ],
+        "cost_adjustment_day": 0,
+        "power": [
+          {
+            "stat_rate": "sensor.solarman_grid_power"
+          }
+        ]
+      },
+      {
+        "type": "solar",
+        "stat_energy_from": "sensor.solarman_total_production",
+        "config_entry_solar_forecast": [
+          "01JCBQCVEYNREW3XFSN99SHH8X"
+        ],
+        "stat_rate": "sensor.solarman_pv_power_2"
+      },
+      {
+        "type": "battery",
+        "stat_energy_from": "sensor.solarman_total_battery_discharge",
+        "stat_energy_to": "sensor.solarman_total_battery_charge"
+      }
+    ],
+    "device_consumption": [
+      {
+        "stat_consumption": "sensor.aaron_s_ac2_energy"
+      },
+      {
+        "stat_consumption": "sensor.mitsubishi_ac_db_5b_b3_energy"
+      },
+      {
+        "stat_consumption": "sensor.james_s_ac2_energy"
+      },
+      {
+        "stat_consumption": "sensor.office_ac2_energy"
+      },
+      {
+        "stat_consumption": "sensor.shellyplus1pm_cc7b5c0b2348_switch_0_energy",
+        "name": "Shower Towel Rail"
+      },
+      {
+        "stat_consumption": "sensor.shellyplus1pm_cc7b5c823d78_switch_0_energy",
+        "name": "Bathroom Towel Rail"
+      },
+      {
+        "stat_consumption": "sensor.solarman_total_losses"
+      },
+      {
+        "stat_consumption": "sensor.10_2_0_238_generator_energy",
+        "stat_rate": "sensor.solarman_generator_power"
+      },
+      {
+        "stat_consumption": "sensor.eveus_pro_total_energy"
+      },
+      {
+        "stat_consumption": "sensor.bathroom_boiler_modbuslink_1_2_electric_energy_consumption",
+        "name": "Bathroom Boiler",
+        "stat_rate": "sensor.bathroom_boiler_electric_power_consumption"
+      },
+      {
+        "stat_consumption": "sensor.starlink_energy",
+        "stat_rate": "sensor.starlink_power"
+      },
+      {
+        "stat_consumption": "sensor.kitchen_ac2_energy",
+        "stat_rate": "sensor.kitchen_ac2_power"
+      }
+    ],
+    "device_consumption_water": []
+  },
+  "metadata": {
+    "sensor.james_s_ac2_energy": {
+      "statistic_id": "sensor.james_s_ac2_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.office_ac2_energy": {
+      "statistic_id": "sensor.office_ac2_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.solarman_total_battery_charge": {
+      "statistic_id": "sensor.solarman_total_battery_charge",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.starlink_energy": {
+      "statistic_id": "sensor.starlink_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.bathroom_boiler_modbuslink_1_2_electric_energy_consumption": {
+      "statistic_id": "sensor.bathroom_boiler_modbuslink_1_2_electric_energy_consumption",
+      "display_unit_of_measurement": "Wh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "Wh",
+      "unit_class": "energy"
+    },
+    "sensor.kitchen_ac2_energy": {
+      "statistic_id": "sensor.kitchen_ac2_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.solarman_total_production": {
+      "statistic_id": "sensor.solarman_total_production",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.solarman_total_battery_discharge": {
+      "statistic_id": "sensor.solarman_total_battery_discharge",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.shellyplus1pm_cc7b5c823d78_switch_0_energy": {
+      "statistic_id": "sensor.shellyplus1pm_cc7b5c823d78_switch_0_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.solarman_total_energy_import": {
+      "statistic_id": "sensor.solarman_total_energy_import",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.10_2_0_238_generator_energy": {
+      "statistic_id": "sensor.10_2_0_238_generator_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.shellyplus1pm_cc7b5c0b2348_switch_0_energy": {
+      "statistic_id": "sensor.shellyplus1pm_cc7b5c0b2348_switch_0_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.eveus_pro_total_energy": {
+      "statistic_id": "sensor.eveus_pro_total_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.mitsubishi_ac_db_5b_b3_energy": {
+      "statistic_id": "sensor.mitsubishi_ac_db_5b_b3_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.solarman_total_losses": {
+      "statistic_id": "sensor.solarman_total_losses",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.aaron_s_ac2_energy": {
+      "statistic_id": "sensor.aaron_s_ac2_energy",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    },
+    "sensor.solarman_total_energy_export": {
+      "statistic_id": "sensor.solarman_total_energy_export",
+      "display_unit_of_measurement": "kWh",
+      "has_mean": false,
+      "mean_type": 0,
+      "has_sum": true,
+      "name": null,
+      "source": "recorder",
+      "statistics_unit_of_measurement": "kWh",
+      "unit_class": "energy"
+    }
+  },
+  "entities": {
+    "sensor.james_s_ac2_energy": {
+      "entity_id": "sensor.james_s_ac2_energy",
+      "device_id": "c899feafed345a515969b3ec997c12a2",
+      "labels": [],
+      "platform": "mitsubishi",
+      "has_entity_name": true,
+      "name": "Energy",
+      "display_precision": 2
+    },
+    "sensor.office_ac2_energy": {
+      "entity_id": "sensor.office_ac2_energy",
+      "device_id": "1c663db536b044e48e4132f36df71f3c",
+      "labels": [],
+      "platform": "mitsubishi",
+      "has_entity_name": true,
+      "name": "Energy",
+      "display_precision": 2
+    },
+    "sensor.solarman_total_battery_charge": {
+      "entity_id": "sensor.solarman_total_battery_charge",
+      "device_id": "da896df2bbee712abdb34d50400e11b1",
+      "labels": [],
+      "translation_key": "total_battery_charge",
+      "platform": "solarman",
+      "has_entity_name": true,
+      "name": "Total Battery Charge",
+      "display_precision": 1
+    },
+    "sensor.starlink_energy": {
+      "entity_id": "sensor.starlink_energy",
+      "device_id": "e099a84ad54e456b82515b2804966ede",
+      "labels": [],
+      "platform": "starlink",
+      "has_entity_name": true,
+      "name": "Energy",
+      "display_precision": 1
+    },
+    "sensor.bathroom_boiler_modbuslink_1_2_electric_energy_consumption": {
+      "entity_id": "sensor.bathroom_boiler_modbuslink_1_2_electric_energy_consumption",
+      "device_id": "5552d81959963df80d823f688d52c924",
+      "labels": [],
+      "platform": "overkiz",
+      "has_entity_name": true,
+      "name": "MODBUSLINK (1#2) Electric energy consumption",
+      "display_precision": 0
+    },
+    "sensor.kitchen_ac2_energy": {
+      "entity_id": "sensor.kitchen_ac2_energy",
+      "device_id": "98c8288f513005d528c7cbb555afc226",
+      "labels": [],
+      "platform": "mitsubishi",
+      "has_entity_name": true,
+      "name": "Energy",
+      "display_precision": 2
+    },
+    "sensor.solarman_total_production": {
+      "entity_id": "sensor.solarman_total_production",
+      "device_id": "da896df2bbee712abdb34d50400e11b1",
+      "labels": [],
+      "translation_key": "total_production",
+      "platform": "solarman",
+      "has_entity_name": true,
+      "name": "Total Production",
+      "display_precision": 1
+    },
+    "sensor.solarman_total_battery_discharge": {
+      "entity_id": "sensor.solarman_total_battery_discharge",
+      "device_id": "da896df2bbee712abdb34d50400e11b1",
+      "labels": [],
+      "translation_key": "total_battery_discharge",
+      "platform": "solarman",
+      "has_entity_name": true,
+      "name": "Total Battery Discharge",
+      "display_precision": 1
+    },
+    "sensor.shellyplus1pm_cc7b5c823d78_switch_0_energy": {
+      "entity_id": "sensor.shellyplus1pm_cc7b5c823d78_switch_0_energy",
+      "device_id": "53f6bd6142d41c0f2ea6e39689a98341",
+      "labels": [],
+      "platform": "shelly",
+      "has_entity_name": true,
+      "name": "Bathroom Towel Rail switch_0 energy",
+      "display_precision": 2
+    },
+    "sensor.solarman_total_energy_import": {
+      "entity_id": "sensor.solarman_total_energy_import",
+      "device_id": "da896df2bbee712abdb34d50400e11b1",
+      "labels": [],
+      "translation_key": "total_energy_import",
+      "platform": "solarman",
+      "has_entity_name": true,
+      "name": "Total Energy Import",
+      "display_precision": 1
+    },
+    "sensor.10_2_0_238_generator_energy": {
+      "entity_id": "sensor.10_2_0_238_generator_energy",
+      "device_id": "da896df2bbee712abdb34d50400e11b1",
+      "labels": [],
+      "translation_key": "generator_energy",
+      "platform": "solarman",
+      "has_entity_name": true,
+      "name": "Generator Energy",
+      "display_precision": 1
+    },
+    "sensor.shellyplus1pm_cc7b5c0b2348_switch_0_energy": {
+      "entity_id": "sensor.shellyplus1pm_cc7b5c0b2348_switch_0_energy",
+      "device_id": "8569b8c5e93764a213bb353904d242c1",
+      "labels": [],
+      "platform": "shelly",
+      "has_entity_name": true,
+      "name": "Shower Towel Rail switch_0 energy",
+      "display_precision": 2
+    },
+    "sensor.eveus_pro_total_energy": {
+      "entity_id": "sensor.eveus_pro_total_energy",
+      "labels": [],
+      "platform": "template",
+      "name": "Eveus Pro Total Energy",
+      "display_precision": 2
+    },
+    "sensor.mitsubishi_ac_db_5b_b3_energy": {
+      "entity_id": "sensor.mitsubishi_ac_db_5b_b3_energy",
+      "device_id": "72df9599d272b5e8fe0ebc6468844dc6",
+      "labels": [],
+      "platform": "mitsubishi",
+      "has_entity_name": true,
+      "name": "Energy",
+      "display_precision": 2
+    },
+    "sensor.solarman_total_losses": {
+      "entity_id": "sensor.solarman_total_losses",
+      "device_id": "da896df2bbee712abdb34d50400e11b1",
+      "labels": [],
+      "translation_key": "total_losses",
+      "platform": "solarman",
+      "has_entity_name": true,
+      "name": "Total Losses",
+      "display_precision": 1
+    },
+    "sensor.aaron_s_ac2_energy": {
+      "entity_id": "sensor.aaron_s_ac2_energy",
+      "device_id": "c193fd79c9a68ab2c136040c39b4c7d2",
+      "labels": [],
+      "platform": "mitsubishi",
+      "has_entity_name": true,
+      "name": "Energy",
+      "display_precision": 2
+    },
+    "sensor.solarman_total_energy_export": {
+      "entity_id": "sensor.solarman_total_energy_export",
+      "device_id": "da896df2bbee712abdb34d50400e11b1",
+      "labels": [],
+      "translation_key": "total_energy_export",
+      "platform": "solarman",
+      "has_entity_name": true,
+      "name": "Total Energy Export",
+      "display_precision": 1
+    }
+  },
+  "states": {
+    "sensor.james_s_ac2_energy": {
+      "entity_id": "sensor.james_s_ac2_energy",
+      "state": "849.9",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "James's AC2 Energy"
+      },
+      "context": {
+        "id": "01KJJP5NC34E2VSXG49NJ465PC",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T17:54:03.779Z",
+      "last_updated": "2026-02-28T17:54:03.779Z"
+    },
+    "sensor.office_ac2_energy": {
+      "entity_id": "sensor.office_ac2_energy",
+      "state": "503.7",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Office AC2 Energy"
+      },
+      "context": {
+        "id": "01KJJMC2MQ55P0MGKT5W42Q5W9",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T17:22:36.823Z",
+      "last_updated": "2026-02-28T17:22:36.823Z"
+    },
+    "sensor.solarman_total_battery_charge": {
+      "entity_id": "sensor.solarman_total_battery_charge",
+      "state": "8664",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:battery-plus",
+        "friendly_name": "Inverter Total Battery Charge"
+      },
+      "context": {
+        "id": "01KJJP6W1W5WJ4RQH1930ZT5HK",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T17:54:43.388Z",
+      "last_updated": "2026-02-28T17:54:43.388Z"
+    },
+    "sensor.starlink_energy": {
+      "entity_id": "sensor.starlink_energy",
+      "state": "12.4946985112431",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Starlink Energy"
+      },
+      "context": {
+        "id": "01KJJQHP5AEAGHG3F0X9QRP9NB",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T18:18:06.378Z",
+      "last_updated": "2026-02-28T18:18:06.378Z"
+    },
+    "sensor.bathroom_boiler_modbuslink_1_2_electric_energy_consumption": {
+      "entity_id": "sensor.bathroom_boiler_modbuslink_1_2_electric_energy_consumption",
+      "state": "1372251",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "Wh",
+        "device_class": "energy",
+        "friendly_name": "Bathroom Boiler  MODBUSLINK (1#2) Electric energy consumption"
+      },
+      "context": {
+        "id": "01KJJHMYYGP8GV64RG6AWYAD7J",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T16:35:02.224Z",
+      "last_updated": "2026-02-28T16:35:02.224Z"
+    },
+    "sensor.kitchen_ac2_energy": {
+      "entity_id": "sensor.kitchen_ac2_energy",
+      "state": "0.0",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Kitchen AC2 Energy"
+      },
+      "context": {
+        "id": "01KJD6Q7D3ZXKNYSPR65NSVR76",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-26T14:47:49.923Z",
+      "last_updated": "2026-02-26T14:47:49.923Z"
+    },
+    "sensor.solarman_total_production": {
+      "entity_id": "sensor.solarman_total_production",
+      "state": "9759.2",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:solar-power",
+        "friendly_name": "Inverter Total Production"
+      },
+      "context": {
+        "id": "01KJJA5FZWC9PCM1T431FECCQR",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T14:24:15.356Z",
+      "last_updated": "2026-02-28T14:24:15.356Z"
+    },
+    "sensor.solarman_total_battery_discharge": {
+      "entity_id": "sensor.solarman_total_battery_discharge",
+      "state": "7956.8",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:battery-minus",
+        "friendly_name": "Inverter Total Battery Discharge"
+      },
+      "context": {
+        "id": "01KJJHKN8R30HYMQ0V6SX636DZ",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T16:34:19.544Z",
+      "last_updated": "2026-02-28T16:34:19.544Z"
+    },
+    "sensor.shellyplus1pm_cc7b5c823d78_switch_0_energy": {
+      "entity_id": "sensor.shellyplus1pm_cc7b5c823d78_switch_0_energy",
+      "state": "182.736324",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Bathroom Towel Rail switch_0 energy"
+      },
+      "context": {
+        "id": "01KJHVAS79FRV3HNNBT05CRSYA",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T10:05:00.009Z",
+      "last_updated": "2026-02-28T10:05:00.009Z"
+    },
+    "sensor.solarman_total_energy_import": {
+      "entity_id": "sensor.solarman_total_energy_import",
+      "state": "24597.1",
+      "attributes": {
+        "state_class": "total_increasing",
+        "Alt Name": "Total Energy Bought",
+        "description": "Total energy imported from the grid",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:transmission-tower-export",
+        "friendly_name": "Inverter Total Energy Import"
+      },
+      "context": {
+        "id": "01KJJQAZG3X49GTYVX15X93HZ1",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T18:14:26.563Z",
+      "last_updated": "2026-02-28T18:14:26.563Z"
+    },
+    "sensor.10_2_0_238_generator_energy": {
+      "entity_id": "sensor.10_2_0_238_generator_energy",
+      "state": "182.8",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Inverter Generator Energy"
+      },
+      "context": {
+        "id": "01KJFS2YDWC0HHVPQSX3ME1MEN",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-27T14:47:17.180Z",
+      "last_updated": "2026-02-27T14:47:17.180Z"
+    },
+    "sensor.shellyplus1pm_cc7b5c0b2348_switch_0_energy": {
+      "entity_id": "sensor.shellyplus1pm_cc7b5c0b2348_switch_0_energy",
+      "state": "120.882357",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Shower Towel Rail switch_0 energy"
+      },
+      "context": {
+        "id": "01KJHGR1C6QH3M7T56RACMB0YF",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T07:00:00.006Z",
+      "last_updated": "2026-02-28T07:00:00.006Z"
+    },
+    "sensor.eveus_pro_total_energy": {
+      "entity_id": "sensor.eveus_pro_total_energy",
+      "state": "3965.765625",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Eveus Pro Total Energy"
+      },
+      "context": {
+        "id": "01KJJ6M1VBMWM7NPAT0HGYCKHH",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T13:22:18.092Z",
+      "last_updated": "2026-02-28T13:22:18.092Z"
+    },
+    "sensor.mitsubishi_ac_db_5b_b3_energy": {
+      "entity_id": "sensor.mitsubishi_ac_db_5b_b3_energy",
+      "state": "1289.1",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Bedroom AC2 Energy"
+      },
+      "context": {
+        "id": "01KJJN9A8KZE1FPS64MDEYMFRE",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T17:38:34.899Z",
+      "last_updated": "2026-02-28T17:38:34.899Z"
+    },
+    "sensor.solarman_total_losses": {
+      "entity_id": "sensor.solarman_total_losses",
+      "state": "749.5",
+      "attributes": {
+        "state_class": "total_increasing",
+        "description": "Includes total consumption of the inverter device itself as well AC/DC conversion losses",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Inverter Total Losses"
+      },
+      "context": {
+        "id": "01KJJNMD6FR4879P5178XKS2DP",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T17:44:38.351Z",
+      "last_updated": "2026-02-28T17:44:38.351Z"
+    },
+    "sensor.aaron_s_ac2_energy": {
+      "entity_id": "sensor.aaron_s_ac2_energy",
+      "state": "489.5",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Aaron's AC2 Energy"
+      },
+      "context": {
+        "id": "01KJJP5MK6RQ4HCQNMBF207AV5",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T17:54:02.982Z",
+      "last_updated": "2026-02-28T17:54:02.982Z"
+    },
+    "sensor.solarman_total_energy_export": {
+      "entity_id": "sensor.solarman_total_energy_export",
+      "state": "11.4",
+      "attributes": {
+        "state_class": "total_increasing",
+        "Alt Name": "Total Energy Sold",
+        "description": "Total energy exported/returned to the grid",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:transmission-tower-import",
+        "friendly_name": "Inverter Total Energy Export"
+      },
+      "context": {
+        "id": "01KJHT5DEW8417RYMQTZWMK95W",
+        "parent_id": null,
+        "user_id": null
+      },
+      "last_changed": "2026-02-28T09:44:35.548Z",
+      "last_updated": "2026-02-28T09:44:35.548Z"
+    }
+  },
+  "issues": {
+    "energy_sources": [
+      [],
+      [],
+      []
+    ],
+    "device_consumption": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+    ],
+    "device_consumption_water": []
+  }
+}

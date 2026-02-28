@@ -135,6 +135,27 @@ static uint8_t list_page_count(uint8_t item_count) {
     return static_cast<uint8_t>((item_count + ROOM_LIST_ROOMS_PER_PAGE - 1) / ROOM_LIST_ROOMS_PER_PAGE);
 }
 
+static uint8_t wifi_list_page_count(uint8_t item_count) {
+    if (item_count == 0) {
+        return 1;
+    }
+    return static_cast<uint8_t>((item_count + WIFI_NETWORKS_PER_PAGE - 1) / WIFI_NETWORKS_PER_PAGE);
+}
+
+static bool float_approx_equal(float a, float b, float epsilon = 0.05f) {
+    float delta = a - b;
+    if (delta < 0.0f) {
+        delta = -delta;
+    }
+    return delta <= epsilon;
+}
+
+static bool standby_forecast_day_equal(const StandbyForecastDay& a, const StandbyForecastDay& b) {
+    return strcmp(a.day_label, b.day_label) == 0 && strcmp(a.condition, b.condition) == 0 && a.high_valid == b.high_valid &&
+           (!a.high_valid || float_approx_equal(a.high_c, b.high_c)) && a.low_valid == b.low_valid &&
+           (!a.low_valid || float_approx_equal(a.low_c, b.low_c));
+}
+
 static uint8_t room_count_for_floor_locked(const EntityStore* store, int8_t floor_idx) {
     if (floor_idx < 0 || floor_idx >= static_cast<int8_t>(store->floor_count)) {
         return 0;
@@ -252,12 +273,17 @@ static uint8_t room_controls_page_count_locked(const EntityStore* store, int8_t 
 void store_init(EntityStore* store) {
     store->mutex = xSemaphoreCreateMutex();
     store->event_group = xEventGroupCreate();
+    store->last_interaction_ms = static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    store->standby_last_refresh_ms = store->last_interaction_ms;
 }
 
 void store_set_wifi_state(EntityStore* store, ConnState state) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     ConnState previous_state = store->wifi;
     store->wifi = state;
+    if (previous_state != state) {
+        store->settings_revision++;
+    }
     xSemaphoreGive(store->mutex);
 
     if (state != previous_state) {
@@ -567,16 +593,24 @@ bool store_go_home(EntityStore* store) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
 
     const bool changed = store->selected_floor != -1 || store->selected_room != -1 || store->floor_list_page != 0 ||
-                         store->room_list_page != 0 || store->room_controls_page != 0;
+                         store->room_list_page != 0 || store->room_controls_page != 0 || store->settings_mode != SettingsMode::None ||
+                         store->standby_active;
 
     store->selected_floor = -1;
     store->selected_room = -1;
     store->floor_list_page = 0;
     store->room_list_page = 0;
     store->room_controls_page = 0;
+    store->settings_mode = SettingsMode::None;
+    if (store->standby_active) {
+        store->standby_active = false;
+        store->standby_data_dirty = false;
+        store->standby_revision++;
+    }
 
     if (changed) {
         store->rooms_revision++;
+        store->settings_revision++;
     }
 
     xSemaphoreGive(store->mutex);
@@ -778,6 +812,582 @@ bool store_get_room_controls_snapshot(EntityStore* store, int8_t room_idx, RoomC
     return true;
 }
 
+bool store_open_settings(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool changed = store->settings_mode != SettingsMode::Menu;
+    store->settings_mode = SettingsMode::Menu;
+    if (changed) {
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+    return true;
+}
+
+bool store_open_wifi_settings(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool changed = store->settings_mode != SettingsMode::Wifi;
+    store->settings_mode = SettingsMode::Wifi;
+    uint8_t page_count = wifi_list_page_count(store->wifi_network_count);
+    if (store->wifi_list_page >= page_count) {
+        store->wifi_list_page = static_cast<uint8_t>(page_count - 1);
+    }
+    if (changed) {
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+    return true;
+}
+
+bool store_open_wifi_password(EntityStore* store, const char* ssid) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool mode_changed = store->settings_mode != SettingsMode::WifiPassword;
+    store->settings_mode = SettingsMode::WifiPassword;
+    copy_string(store->wifi_target_ssid, sizeof(store->wifi_target_ssid), ssid);
+    store->wifi_password_input[0] = '\0';
+    store->wifi_password_symbols = false;
+    store->wifi_password_shift = false;
+    store->wifi_connect_error[0] = '\0';
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+    (void)mode_changed;
+    return true;
+}
+
+bool store_open_standby(EntityStore* store, uint32_t now_ms) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool can_activate = store->wifi == ConnState::Up && store->home_assistant == ConnState::Up && store->rooms_loaded;
+    const bool changed = can_activate && (!store->standby_active || store->settings_mode != SettingsMode::None);
+    if (changed) {
+        store->settings_mode = SettingsMode::None;
+        store->standby_active = true;
+        store->standby_last_refresh_ms = now_ms;
+        store->standby_data_dirty = false;
+        store->standby_revision++;
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+    return changed;
+}
+
+bool store_settings_back(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    SettingsMode next_mode = store->settings_mode;
+    switch (store->settings_mode) {
+    case SettingsMode::WifiPassword:
+        next_mode = SettingsMode::Wifi;
+        break;
+    case SettingsMode::Wifi:
+        next_mode = SettingsMode::Menu;
+        break;
+    case SettingsMode::Menu:
+        next_mode = SettingsMode::None;
+        break;
+    default:
+        next_mode = SettingsMode::None;
+        break;
+    }
+    const bool changed = next_mode != store->settings_mode;
+    store->settings_mode = next_mode;
+    if (changed) {
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+    return changed;
+}
+
+bool store_close_settings(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool changed = store->settings_mode != SettingsMode::None;
+    store->settings_mode = SettingsMode::None;
+    if (changed) {
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+    return changed;
+}
+
+bool store_shift_wifi_list_page(EntityStore* store, int8_t delta) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    int16_t page = static_cast<int16_t>(store->wifi_list_page) + delta;
+    uint8_t pages = wifi_list_page_count(store->wifi_network_count);
+    if (page < 0) {
+        page = 0;
+    } else if (page >= pages) {
+        page = pages - 1;
+    }
+    if (store->wifi_list_page == static_cast<uint8_t>(page)) {
+        xSemaphoreGive(store->mutex);
+        return false;
+    }
+    store->wifi_list_page = static_cast<uint8_t>(page);
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+    return true;
+}
+
+bool store_set_wifi_password_symbols(EntityStore* store, bool symbols) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    if (store->wifi_password_symbols == symbols) {
+        xSemaphoreGive(store->mutex);
+        return false;
+    }
+    store->wifi_password_symbols = symbols;
+    store->wifi_password_shift = false;
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+    return true;
+}
+
+bool store_toggle_wifi_password_shift(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    store->wifi_password_shift = !store->wifi_password_shift;
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+    return true;
+}
+
+bool store_append_wifi_password_char(EntityStore* store, char ch) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    size_t len = strlen(store->wifi_password_input);
+    if (len >= MAX_WIFI_PASSWORD_LEN) {
+        xSemaphoreGive(store->mutex);
+        return false;
+    }
+    store->wifi_password_input[len] = ch;
+    store->wifi_password_input[len + 1] = '\0';
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+    return true;
+}
+
+bool store_backspace_wifi_password(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    size_t len = strlen(store->wifi_password_input);
+    if (len == 0) {
+        xSemaphoreGive(store->mutex);
+        return false;
+    }
+    store->wifi_password_input[len - 1] = '\0';
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+    return true;
+}
+
+bool store_clear_wifi_password(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    if (store->wifi_password_input[0] == '\0') {
+        xSemaphoreGive(store->mutex);
+        return false;
+    }
+    store->wifi_password_input[0] = '\0';
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+    return true;
+}
+
+void store_set_wifi_connection_info(EntityStore* store, bool connected, const char* ssid, const char* ip_address, int16_t rssi) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    bool changed = false;
+    if (store->wifi_connected != connected) {
+        store->wifi_connected = connected;
+        changed = true;
+    }
+    int16_t rssi_delta = static_cast<int16_t>(store->wifi_rssi - rssi);
+    if (rssi_delta < 0) {
+        rssi_delta = static_cast<int16_t>(-rssi_delta);
+    }
+    // Avoid frequent full-screen redraws for minor RSSI jitter.
+    if (!connected || !store->wifi_connected || rssi_delta >= 4) {
+        if (store->wifi_rssi != rssi) {
+            store->wifi_rssi = rssi;
+            changed = true;
+        }
+    }
+    if (strcmp(store->wifi_connected_ssid, ssid ? ssid : "") != 0) {
+        copy_string(store->wifi_connected_ssid, sizeof(store->wifi_connected_ssid), ssid);
+        changed = true;
+    }
+    if (strcmp(store->wifi_ip_address, ip_address ? ip_address : "") != 0) {
+        copy_string(store->wifi_ip_address, sizeof(store->wifi_ip_address), ip_address);
+        changed = true;
+    }
+    if (changed) {
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+}
+
+void store_set_wifi_scan_state(EntityStore* store, bool in_progress) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    if (store->wifi_scan_in_progress == in_progress) {
+        xSemaphoreGive(store->mutex);
+        return;
+    }
+    store->wifi_scan_in_progress = in_progress;
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+}
+
+void store_set_wifi_scan_results(EntityStore* store, const WifiNetwork* networks, uint8_t count) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    if (count > MAX_WIFI_NETWORKS) {
+        count = MAX_WIFI_NETWORKS;
+    }
+    memset(store->wifi_networks, 0, sizeof(store->wifi_networks));
+    for (uint8_t i = 0; i < count; i++) {
+        copy_string(store->wifi_networks[i].ssid, sizeof(store->wifi_networks[i].ssid), networks[i].ssid);
+        store->wifi_networks[i].rssi = networks[i].rssi;
+        store->wifi_networks[i].secure = networks[i].secure;
+    }
+    store->wifi_network_count = count;
+    uint8_t pages = wifi_list_page_count(count);
+    if (store->wifi_list_page >= pages) {
+        store->wifi_list_page = static_cast<uint8_t>(pages - 1);
+    }
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+}
+
+void store_set_wifi_connecting(EntityStore* store, bool connecting) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    if (store->wifi_connecting == connecting) {
+        xSemaphoreGive(store->mutex);
+        return;
+    }
+    store->wifi_connecting = connecting;
+    if (connecting) {
+        store->wifi_connect_error[0] = '\0';
+    }
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+}
+
+void store_set_wifi_connect_error(EntityStore* store, const char* error) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const char* safe_error = error ? error : "";
+    if (strcmp(store->wifi_connect_error, safe_error) == 0) {
+        xSemaphoreGive(store->mutex);
+        return;
+    }
+    copy_string(store->wifi_connect_error, sizeof(store->wifi_connect_error), safe_error);
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+}
+
+void store_set_wifi_profile(EntityStore* store, const char* ssid, bool custom_profile_active) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    bool changed = false;
+    const char* safe_ssid = ssid ? ssid : "";
+    if (store->wifi_custom_profile_active != custom_profile_active) {
+        store->wifi_custom_profile_active = custom_profile_active;
+        changed = true;
+    }
+    if (strcmp(store->wifi_profile_ssid, safe_ssid) != 0) {
+        copy_string(store->wifi_profile_ssid, sizeof(store->wifi_profile_ssid), safe_ssid);
+        changed = true;
+    }
+    if (changed) {
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+}
+
+void store_get_wifi_settings_snapshot(EntityStore* store, WifiSettingsSnapshot* snapshot) {
+    memset(snapshot, 0, sizeof(WifiSettingsSnapshot));
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    snapshot->wifi_state = store->wifi;
+    snapshot->connected = store->wifi_connected;
+    snapshot->scan_in_progress = store->wifi_scan_in_progress;
+    snapshot->connecting = store->wifi_connecting;
+    snapshot->custom_profile_active = store->wifi_custom_profile_active;
+    snapshot->rssi = store->wifi_rssi;
+    snapshot->page = store->wifi_list_page;
+    snapshot->network_count = store->wifi_network_count;
+    copy_string(snapshot->connect_error, sizeof(snapshot->connect_error), store->wifi_connect_error);
+    copy_string(snapshot->connected_ssid, sizeof(snapshot->connected_ssid), store->wifi_connected_ssid);
+    copy_string(snapshot->profile_ssid, sizeof(snapshot->profile_ssid), store->wifi_profile_ssid);
+    copy_string(snapshot->ip_address, sizeof(snapshot->ip_address), store->wifi_ip_address);
+    for (uint8_t i = 0; i < store->wifi_network_count && i < MAX_WIFI_NETWORKS; i++) {
+        copy_string(snapshot->networks[i].ssid, sizeof(snapshot->networks[i].ssid), store->wifi_networks[i].ssid);
+        snapshot->networks[i].rssi = store->wifi_networks[i].rssi;
+        snapshot->networks[i].secure = store->wifi_networks[i].secure;
+    }
+    xSemaphoreGive(store->mutex);
+}
+
+bool store_get_wifi_password_snapshot(EntityStore* store, WifiPasswordSnapshot* snapshot) {
+    memset(snapshot, 0, sizeof(WifiPasswordSnapshot));
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    if (store->settings_mode != SettingsMode::WifiPassword) {
+        xSemaphoreGive(store->mutex);
+        return false;
+    }
+    snapshot->symbols = store->wifi_password_symbols;
+    snapshot->shift = store->wifi_password_shift;
+    snapshot->connecting = store->wifi_connecting;
+    copy_string(snapshot->target_ssid, sizeof(snapshot->target_ssid), store->wifi_target_ssid);
+    copy_string(snapshot->password, sizeof(snapshot->password), store->wifi_password_input);
+    copy_string(snapshot->connect_error, sizeof(snapshot->connect_error), store->wifi_connect_error);
+    xSemaphoreGive(store->mutex);
+    return true;
+}
+
+void store_note_interaction(EntityStore* store, uint32_t now_ms) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    store->last_interaction_ms = now_ms;
+    xSemaphoreGive(store->mutex);
+}
+
+void store_poll_standby_timeout(EntityStore* store, uint32_t now_ms) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+
+    const bool can_activate = store->settings_mode == SettingsMode::None && store->wifi == ConnState::Up &&
+                              store->home_assistant == ConnState::Up && store->rooms_loaded;
+    const bool idle_timed_out = static_cast<uint32_t>(now_ms - store->last_interaction_ms) >= STANDBY_IDLE_TIMEOUT_MS;
+    bool changed = false;
+
+    if (store->standby_active) {
+        if (!can_activate) {
+            store->standby_active = false;
+            store->standby_data_dirty = false;
+            store->standby_revision++;
+            changed = true;
+        } else {
+            const uint32_t elapsed = static_cast<uint32_t>(now_ms - store->standby_last_refresh_ms);
+            if (elapsed >= STANDBY_REFRESH_INTERVAL_MS) {
+                store->standby_last_refresh_ms = now_ms;
+                store->standby_data_dirty = false;
+                store->standby_revision++;
+                changed = true;
+            }
+        }
+    } else if (can_activate && idle_timed_out) {
+        store->standby_active = true;
+        store->standby_last_refresh_ms = now_ms;
+        store->standby_data_dirty = false;
+        store->standby_revision++;
+        changed = true;
+    }
+
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+}
+
+void store_set_standby_weather(EntityStore* store, const char* condition, bool has_temperature, float temperature_c) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    bool changed = false;
+    bool should_notify = false;
+
+    char normalized_condition[MAX_STANDBY_CONDITION_LEN];
+    copy_string(normalized_condition, sizeof(normalized_condition), condition);
+    if (strcmp(store->standby.weather_condition, normalized_condition) != 0) {
+        copy_string(store->standby.weather_condition, sizeof(store->standby.weather_condition), normalized_condition);
+        changed = true;
+    }
+
+    if (store->standby.weather_temperature_valid != has_temperature) {
+        store->standby.weather_temperature_valid = has_temperature;
+        changed = true;
+    }
+    if (has_temperature && !float_approx_equal(store->standby.weather_temperature_c, temperature_c)) {
+        store->standby.weather_temperature_c = temperature_c;
+        changed = true;
+    }
+
+    if (changed) {
+        if (store->standby_active) {
+            store->standby_data_dirty = true;
+        } else {
+            store->standby_revision++;
+            should_notify = true;
+        }
+    }
+    xSemaphoreGive(store->mutex);
+    if (should_notify) {
+        notify_ui(store);
+    }
+}
+
+void store_set_standby_forecast(EntityStore* store, const StandbyForecastDay* days, uint8_t day_count) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    bool changed = false;
+    bool should_notify = false;
+    if (day_count > MAX_STANDBY_FORECAST_DAYS) {
+        day_count = MAX_STANDBY_FORECAST_DAYS;
+    }
+
+    bool has_high = false;
+    float high_c = 0.0f;
+    bool has_low = false;
+    float low_c = 0.0f;
+    if (days && day_count > 0) {
+        has_high = days[0].high_valid;
+        high_c = days[0].high_c;
+        has_low = days[0].low_valid;
+        low_c = days[0].low_c;
+    }
+
+    if (store->standby.weather_high_valid != has_high) {
+        store->standby.weather_high_valid = has_high;
+        changed = true;
+    }
+    if (has_high && !float_approx_equal(store->standby.weather_high_c, high_c)) {
+        store->standby.weather_high_c = high_c;
+        changed = true;
+    }
+    if (store->standby.weather_low_valid != has_low) {
+        store->standby.weather_low_valid = has_low;
+        changed = true;
+    }
+    if (has_low && !float_approx_equal(store->standby.weather_low_c, low_c)) {
+        store->standby.weather_low_c = low_c;
+        changed = true;
+    }
+
+    if (store->standby.forecast_day_count != day_count) {
+        store->standby.forecast_day_count = day_count;
+        changed = true;
+    }
+
+    for (uint8_t idx = 0; idx < MAX_STANDBY_FORECAST_DAYS; idx++) {
+        StandbyForecastDay next_day = {};
+        if (days && idx < day_count) {
+            next_day = days[idx];
+        }
+        if (!standby_forecast_day_equal(store->standby.forecast_days[idx], next_day)) {
+            store->standby.forecast_days[idx] = next_day;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        if (store->standby_active) {
+            store->standby_data_dirty = true;
+        } else {
+            store->standby_revision++;
+            should_notify = true;
+        }
+    }
+    xSemaphoreGive(store->mutex);
+    if (should_notify) {
+        notify_ui(store);
+    }
+}
+
+void store_set_standby_energy_metric(EntityStore* store, StandbyEnergyMetric metric, bool valid, float value) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    bool changed = false;
+    bool should_notify = false;
+
+    bool* valid_ptr = nullptr;
+    float* value_ptr = nullptr;
+    float epsilon = 0.05f;
+    switch (metric) {
+    case StandbyEnergyMetric::SolarGeneration:
+        valid_ptr = &store->standby.solar_generation_valid;
+        value_ptr = &store->standby.solar_generation_kwh;
+        break;
+    case StandbyEnergyMetric::GridInput:
+        valid_ptr = &store->standby.grid_input_valid;
+        value_ptr = &store->standby.grid_input_kwh;
+        break;
+    case StandbyEnergyMetric::GridExport:
+        valid_ptr = &store->standby.grid_export_valid;
+        value_ptr = &store->standby.grid_export_kwh;
+        break;
+    case StandbyEnergyMetric::BatteryUsage:
+        valid_ptr = &store->standby.battery_usage_valid;
+        value_ptr = &store->standby.battery_usage_kwh;
+        break;
+    case StandbyEnergyMetric::BatteryChargeEnergy:
+        valid_ptr = &store->standby.battery_charge_energy_valid;
+        value_ptr = &store->standby.battery_charge_energy_kwh;
+        break;
+    case StandbyEnergyMetric::BatteryCharge:
+        valid_ptr = &store->standby.battery_charge_valid;
+        value_ptr = &store->standby.battery_charge_pct;
+        epsilon = 0.5f;
+        break;
+    case StandbyEnergyMetric::HouseUsage:
+        valid_ptr = &store->standby.house_usage_valid;
+        value_ptr = &store->standby.house_usage_kwh;
+        break;
+    default:
+        xSemaphoreGive(store->mutex);
+        return;
+    }
+
+    if (*valid_ptr != valid) {
+        *valid_ptr = valid;
+        changed = true;
+    }
+    if (valid && !float_approx_equal(*value_ptr, value, epsilon)) {
+        *value_ptr = value;
+        changed = true;
+    }
+
+    if (changed) {
+        if (store->standby_active) {
+            store->standby_data_dirty = true;
+        } else {
+            store->standby_revision++;
+            should_notify = true;
+        }
+    }
+    xSemaphoreGive(store->mutex);
+    if (should_notify) {
+        notify_ui(store);
+    }
+}
+
+void store_get_standby_snapshot(EntityStore* store, StandbySnapshot* snapshot) {
+    memset(snapshot, 0, sizeof(StandbySnapshot));
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    *snapshot = store->standby;
+    xSemaphoreGive(store->mutex);
+}
+
+bool store_is_standby_active(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool active = store->standby_active;
+    xSemaphoreGive(store->mutex);
+    return active;
+}
+
 void store_update_ui_state(EntityStore* store, const Screen* screen, UIState* ui_state) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
 
@@ -787,32 +1397,54 @@ void store_update_ui_state(EntityStore* store, const Screen* screen, UIState* ui
     ui_state->room_list_page = store->room_list_page;
     ui_state->room_controls_page = store->room_controls_page;
     ui_state->rooms_revision = store->rooms_revision;
+    ui_state->wifi_list_page = store->wifi_list_page;
+    ui_state->settings_revision = store->settings_revision;
+    ui_state->standby_revision = store->standby_revision;
 
-    // Handle wifi and home assistant state first
-    if (store->wifi == ConnState::Up && store->home_assistant == ConnState::Up) {
-        if (!store->rooms_loaded) {
-            ui_state->mode = UiMode::Boot;
-        } else if (store->selected_floor < 0) {
-            ui_state->mode = UiMode::FloorList;
-        } else if (store->selected_room < 0) {
-            ui_state->mode = UiMode::RoomList;
-        } else {
-            ui_state->mode = UiMode::RoomControls;
+    if (store->settings_mode != SettingsMode::None) {
+        switch (store->settings_mode) {
+        case SettingsMode::Menu:
+            ui_state->mode = UiMode::SettingsMenu;
+            break;
+        case SettingsMode::Wifi:
+            ui_state->mode = UiMode::WifiSettings;
+            break;
+        case SettingsMode::WifiPassword:
+            ui_state->mode = UiMode::WifiPassword;
+            break;
+        default:
+            ui_state->mode = UiMode::SettingsMenu;
+            break;
         }
-    } else if (store->wifi == ConnState::Initializing) {
-        ui_state->mode = UiMode::Boot;
-    } else if (store->wifi == ConnState::InvalidCredentials) {
-        ui_state->mode = UiMode::WifiDisconnected;
-    } else if (store->wifi == ConnState::ConnectionError) {
-        ui_state->mode = UiMode::WifiDisconnected;
-    } else if (store->home_assistant == ConnState::Initializing) {
-        ui_state->mode = UiMode::Boot;
-    } else if (store->home_assistant == ConnState::InvalidCredentials) {
-        ui_state->mode = UiMode::HassInvalidKey;
-    } else if (store->home_assistant == ConnState::ConnectionError) {
-        ui_state->mode = UiMode::HassDisconnected;
     } else {
-        ui_state->mode = UiMode::GenericError;
+        // Handle wifi and home assistant state first
+        if (store->wifi == ConnState::Up && store->home_assistant == ConnState::Up) {
+            if (!store->rooms_loaded) {
+                ui_state->mode = UiMode::Boot;
+            } else if (store->standby_active) {
+                ui_state->mode = UiMode::Standby;
+            } else if (store->selected_floor < 0) {
+                ui_state->mode = UiMode::FloorList;
+            } else if (store->selected_room < 0) {
+                ui_state->mode = UiMode::RoomList;
+            } else {
+                ui_state->mode = UiMode::RoomControls;
+            }
+        } else if (store->wifi == ConnState::Initializing) {
+            ui_state->mode = UiMode::Boot;
+        } else if (store->wifi == ConnState::InvalidCredentials) {
+            ui_state->mode = UiMode::WifiDisconnected;
+        } else if (store->wifi == ConnState::ConnectionError) {
+            ui_state->mode = UiMode::WifiDisconnected;
+        } else if (store->home_assistant == ConnState::Initializing) {
+            ui_state->mode = UiMode::Boot;
+        } else if (store->home_assistant == ConnState::InvalidCredentials) {
+            ui_state->mode = UiMode::HassInvalidKey;
+        } else if (store->home_assistant == ConnState::ConnectionError) {
+            ui_state->mode = UiMode::HassDisconnected;
+        } else {
+            ui_state->mode = UiMode::GenericError;
+        }
     }
 
     memset(ui_state->widget_values, 0, sizeof(ui_state->widget_values));

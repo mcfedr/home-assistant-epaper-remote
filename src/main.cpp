@@ -72,20 +72,20 @@ void setup() {
 }
 
 void loop() {
-    if (HOME_BUTTON_PIN < 0) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        return;
+    wifi_poll();
+
+    if (HOME_BUTTON_PIN >= 0) {
+        static bool was_pressed = false;
+        const int raw_level = digitalRead(HOME_BUTTON_PIN);
+        const bool pressed = HOME_BUTTON_ACTIVE_LOW ? raw_level == LOW : raw_level == HIGH;
+
+        if (pressed && !was_pressed) {
+            ESP_LOGI(TAG, "Home button pressed");
+            store_go_home(&store);
+        }
+
+        was_pressed = pressed;
     }
 
-    static bool was_pressed = false;
-    const int raw_level = digitalRead(HOME_BUTTON_PIN);
-    const bool pressed = HOME_BUTTON_ACTIVE_LOW ? raw_level == LOW : raw_level == HIGH;
-
-    if (pressed && !was_pressed) {
-        ESP_LOGI(TAG, "Home button pressed");
-        store_go_home(&store);
-    }
-
-    was_pressed = pressed;
     vTaskDelay(pdMS_TO_TICKS(25));
 }
