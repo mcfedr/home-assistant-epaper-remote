@@ -10,6 +10,8 @@ constexpr size_t TOUCH_SDA = 39;
 constexpr size_t TOUCH_SCL = 40;
 constexpr size_t TOUCH_INT = 3;
 constexpr size_t TOUCH_RST = 9;
+constexpr int HOME_BUTTON_PIN = 0; // Front boot button
+constexpr bool HOME_BUTTON_ACTIVE_LOW = true;
 constexpr int DISPLAY_PANEL = BB_PANEL_EPDIY_V7;
 #endif
 
@@ -20,5 +22,7 @@ constexpr size_t TOUCH_SDA = 41;
 constexpr size_t TOUCH_SCL = 42;
 constexpr size_t TOUCH_INT = 48;
 constexpr size_t TOUCH_RST = 0;
+constexpr int HOME_BUTTON_PIN = -1; // No dedicated front home button mapping
+constexpr bool HOME_BUTTON_ACTIVE_LOW = true;
 constexpr int DISPLAY_PANEL = BB_PANEL_M5PAPERS3;
 #endif

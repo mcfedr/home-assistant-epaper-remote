@@ -384,6 +384,10 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
     CommandType command_type = CommandType::SetLightBrightnessPercentage;
     uint8_t climate_mode_mask = CLIMATE_MODE_MASK_DEFAULT;
     uint8_t previous_climate_mode_mask = CLIMATE_MODE_MASK_DEFAULT;
+    bool climate_hvac_modes_known = false;
+    bool climate_is_ac = false;
+    bool previous_climate_hvac_modes_known = false;
+    bool previous_climate_is_ac = false;
 
     xSemaphoreTake(hass->mutex, portMAX_DELAY);
     entity_mode = hass->entity_modes[widget_idx];
@@ -393,6 +397,10 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
     if (command_type == CommandType::SetClimateModeAndTemperature) {
         previous_climate_mode_mask = climate_normalize_mode_mask(hass->store->entities[widget_idx].climate_mode_mask);
         climate_mode_mask = previous_climate_mode_mask;
+        previous_climate_hvac_modes_known = hass->store->entities[widget_idx].climate_hvac_modes_known;
+        previous_climate_is_ac = hass->store->entities[widget_idx].climate_is_ac;
+        climate_hvac_modes_known = previous_climate_hvac_modes_known;
+        climate_is_ac = previous_climate_is_ac;
     }
     xSemaphoreGive(hass->store->mutex);
 
@@ -409,6 +417,7 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
         if (cJSON_IsObject(attributes)) {
             cJSON* hvac_modes = cJSON_GetObjectItem(attributes, "hvac_modes");
             if (cJSON_IsArray(hvac_modes)) {
+                climate_hvac_modes_known = true;
                 uint8_t parsed_mode_mask = 0;
                 cJSON* hvac_mode_item = nullptr;
                 cJSON_ArrayForEach(hvac_mode_item, hvac_modes) {
@@ -428,6 +437,7 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
                     }
                 }
 
+                climate_is_ac = (parsed_mode_mask & CLIMATE_MODE_MASK_COOL) != 0;
                 if ((parsed_mode_mask & (CLIMATE_MODE_MASK_HEAT | CLIMATE_MODE_MASK_COOL)) != 0) {
                     climate_mode_mask = climate_normalize_mode_mask(parsed_mode_mask);
                 }
@@ -500,6 +510,8 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
     if (command_type == CommandType::SetClimateModeAndTemperature) {
         xSemaphoreTake(hass->store->mutex, portMAX_DELAY);
         hass->store->entities[widget_idx].climate_mode_mask = climate_mode_mask;
+        hass->store->entities[widget_idx].climate_hvac_modes_known = climate_hvac_modes_known;
+        hass->store->entities[widget_idx].climate_is_ac = climate_is_ac;
         xSemaphoreGive(hass->store->mutex);
     }
 
@@ -515,7 +527,11 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
 
     ESP_LOGI(TAG, "Setting value of widget %d to %d", widget_idx, value);
     store_update_value(hass->store, widget_idx, value);
-    if (command_type == CommandType::SetClimateModeAndTemperature && climate_mode_mask != previous_climate_mode_mask) {
+    if (command_type == CommandType::SetClimateModeAndTemperature &&
+        (climate_mode_mask != previous_climate_mode_mask || climate_hvac_modes_known != previous_climate_hvac_modes_known ||
+         climate_is_ac != previous_climate_is_ac)) {
+        ESP_LOGI(TAG, "Climate visibility updated for %s: hvac_modes_known=%d, is_ac=%d", entity_id, climate_hvac_modes_known ? 1 : 0,
+                 climate_is_ac ? 1 : 0);
         store_bump_rooms_revision(hass->store);
     }
 }

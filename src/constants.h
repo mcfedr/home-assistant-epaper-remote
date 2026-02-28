@@ -8,7 +8,7 @@ constexpr uint8_t BUTTON_BORDER_SIZE = 4;
 constexpr uint8_t BUTTON_SIZE = 100;
 constexpr uint8_t BUTTON_ICON_SIZE = 64;
 constexpr uint8_t SLIDER_OFFSET = 100;    // The zero is a bit on the right
-constexpr uint8_t TOUCH_AREA_MARGIN = 15; // A touch within 15px of the target is OK
+constexpr uint8_t TOUCH_AREA_MARGIN = 20; // Larger touch target for easier tapping
 
 // Home assistant configuration
 constexpr uint32_t HASS_MAX_JSON_BUFFER = 1024 * 256; // 256k, area/entity registries can be large
@@ -46,7 +46,7 @@ constexpr uint16_t ROOM_LIST_TITLE_Y = 40;
 constexpr uint8_t ROOM_LIST_COLUMNS = 2;
 constexpr uint8_t ROOM_LIST_ROWS = 4;
 constexpr uint8_t ROOM_LIST_ROOMS_PER_PAGE = ROOM_LIST_COLUMNS * ROOM_LIST_ROWS;
-constexpr uint16_t FLOOR_LIST_GRID_START_Y = 48;
+constexpr uint16_t FLOOR_LIST_GRID_START_Y = 120;
 constexpr uint16_t ROOM_LIST_HEADER_HEIGHT = 100;
 constexpr uint16_t ROOM_LIST_GRID_START_Y = ROOM_LIST_HEADER_HEIGHT + 12;
 constexpr uint16_t ROOM_LIST_GRID_BOTTOM_Y = 860;
@@ -59,15 +59,18 @@ constexpr uint16_t ROOM_LIST_TILE_ICON_SIZE = 64;
 constexpr uint16_t ROOM_LIST_TILE_ICON_TOP_PADDING = 10;
 constexpr uint16_t ROOM_LIST_TILE_ICON_LABEL_GAP = 10;
 constexpr uint16_t ROOM_LIST_TILE_LABEL_BOTTOM_PADDING = 8;
+constexpr uint16_t ROOM_LIST_TILE_RADIUS = 18;
 
 // Room controls UI geometry
 constexpr uint16_t ROOM_CONTROLS_HEADER_HEIGHT = 110;
 constexpr uint16_t ROOM_CONTROLS_ITEM_START_Y = 130;
-constexpr uint16_t ROOM_CONTROLS_LIGHT_HEIGHT = BUTTON_SIZE + 50;
-constexpr uint16_t ROOM_CONTROLS_CLIMATE_HEIGHT = BUTTON_SIZE * 2 + 40;
+constexpr uint16_t ROOM_CONTROLS_LIGHT_HEIGHT = (BUTTON_SIZE + 50) * 13 / 10;      // +30%
+constexpr uint16_t ROOM_CONTROLS_LIGHT_MIN_HEIGHT = 96;                              // Keep enough room for icon + label
+constexpr uint16_t ROOM_CONTROLS_CLIMATE_HEIGHT = (BUTTON_SIZE * 2 + 40) * 13 / 10; // +30%
 constexpr uint16_t ROOM_CONTROLS_ITEM_GAP = 20;
 constexpr uint16_t ROOM_CONTROLS_LIGHT_COLUMN_GAP = 20;
 constexpr uint16_t ROOM_CONTROLS_ITEM_X = 30;
+constexpr uint16_t ROOM_CONTROLS_BOTTOM_PADDING = 12;
 constexpr uint16_t ROOM_CONTROLS_BACK_X = 20;
 constexpr uint16_t ROOM_CONTROLS_BACK_Y = 25;
 constexpr uint16_t ROOM_CONTROLS_BACK_W = 120;

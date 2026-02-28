@@ -74,8 +74,8 @@ void touch_task(void* arg) {
     // Touch infos
     TOUCHINFO ti;
     TouchEvent touch_event = TouchEvent{};
-    TouchEvent room_list_touch_start = TouchEvent{};
-    TouchEvent room_list_touch_end = TouchEvent{};
+    TouchEvent touch_start = TouchEvent{};
+    TouchEvent touch_end = TouchEvent{};
     static FloorListSnapshot floor_list_snapshot = {};
     static RoomListSnapshot room_list_snapshot = {};
     bool touching = false;
@@ -111,13 +111,13 @@ void touch_task(void* arg) {
                         continue;
                     }
 
-                    room_list_touch_start.x = ti.x[0];
-                    room_list_touch_start.y = ti.y[0];
-                    room_list_touch_end = room_list_touch_start;
+                    touch_start.x = ti.x[0];
+                    touch_start.y = ti.y[0];
+                    touch_end = touch_start;
                     touching = true;
                 } else {
-                    room_list_touch_end.x = ti.x[0];
-                    room_list_touch_end.y = ti.y[0];
+                    touch_end.x = ti.x[0];
+                    touch_end.y = ti.y[0];
                 }
                 continue;
             }
@@ -126,20 +126,11 @@ void touch_task(void* arg) {
                 continue;
             }
 
-            // We're already targeting a widget
-            if (active_widget != -1) {
-                if (touch_event.x == ti.x[0] && touch_event.y == ti.y[0]) {
-                    // Finger did not move, ignore
-                } else {
-                    touch_event.x = ti.x[0];
-                    touch_event.y = ti.y[0];
-
-                    widget_current_value = screen->widgets[active_widget]->getValueFromTouch(&touch_event, widget_original_value);
-                    store_send_command(store, screen->entity_ids[active_widget], widget_current_value);
-                }
-            } else if (touching == false) {
+            if (touching == false) {
                 touch_event.x = ti.x[0];
                 touch_event.y = ti.y[0];
+                touch_start = touch_event;
+                touch_end = touch_event;
                 touching = true;
 
                 if (is_back_button_touched(&touch_event)) {
@@ -152,16 +143,12 @@ void touch_task(void* arg) {
                     if (screen->widgets[widget_idx]->isTouching(&touch_event)) {
                         ESP_LOGI(TAG, "Starting touch on widget %d", widget_idx);
                         active_widget = widget_idx;
-
-                        // Get the new value
-                        widget_original_value = ui_state->widget_values[widget_idx];
-                        widget_current_value = screen->widgets[widget_idx]->getValueFromTouch(&touch_event, widget_original_value);
-
-                        store_send_command(store, screen->entity_ids[active_widget], widget_current_value);
-
                         break;
                     }
                 }
+            } else {
+                touch_end.x = ti.x[0];
+                touch_end.y = ti.y[0];
             }
         } else {
             if (touching) {
@@ -169,7 +156,7 @@ void touch_task(void* arg) {
 
                 if ((ui_state->mode == UiMode::FloorList || ui_state->mode == UiMode::RoomList) &&
                     millis() - last_touch_ms > TOUCH_RELEASE_TIMEOUT_MS) {
-                    int8_t page_delta = list_swipe_delta(&room_list_touch_start, &room_list_touch_end);
+                    int8_t page_delta = list_swipe_delta(&touch_start, &touch_end);
                     if (ui_state->mode == UiMode::FloorList) {
                         if (page_delta != 0) {
                             if (store_shift_floor_list_page(store, page_delta)) {
@@ -177,7 +164,7 @@ void touch_task(void* arg) {
                             }
                         } else {
                             store_get_floor_list_snapshot(store, &floor_list_snapshot);
-                            int16_t floor_idx = list_index_from_touch(&room_list_touch_start, floor_list_snapshot.floor_count,
+                            int16_t floor_idx = list_index_from_touch(&touch_start, floor_list_snapshot.floor_count,
                                                                       ui_state->floor_list_page, FLOOR_LIST_GRID_START_Y);
                             if (floor_idx >= 0) {
                                 ESP_LOGI(TAG, "Selecting floor %d", floor_idx);
@@ -190,7 +177,7 @@ void touch_task(void* arg) {
                                 ESP_LOGI(TAG, "Swiped room list to page delta %d", page_delta);
                             }
                         } else if (store_get_room_list_snapshot(store, ui_state->selected_floor, &room_list_snapshot)) {
-                            int16_t room_list_idx = list_index_from_touch(&room_list_touch_start, room_list_snapshot.room_count,
+                            int16_t room_list_idx = list_index_from_touch(&touch_start, room_list_snapshot.room_count,
                                                                           ui_state->room_list_page, ROOM_LIST_GRID_START_Y);
                             if (room_list_idx >= 0) {
                                 int8_t room_idx = room_list_snapshot.room_indices[room_list_idx];
@@ -200,6 +187,26 @@ void touch_task(void* arg) {
                         }
                     }
 
+                    touching = false;
+                    active_widget = -1;
+                    continue;
+                }
+
+                if (ui_state->mode == UiMode::RoomControls && millis() - last_touch_ms > TOUCH_RELEASE_TIMEOUT_MS) {
+                    int8_t page_delta = list_swipe_delta(&touch_start, &touch_end);
+                    if (page_delta != 0) {
+                        if (store_shift_room_controls_page(store, page_delta)) {
+                            ESP_LOGI(TAG, "Swiped room controls to page delta %d", page_delta);
+                        }
+                    } else if (active_widget != -1) {
+                        widget_original_value = ui_state->widget_values[active_widget];
+                        widget_current_value = screen->widgets[active_widget]->getValueFromTouch(&touch_end, widget_original_value);
+                        if (widget_current_value != widget_original_value) {
+                            store_send_command(store, screen->entity_ids[active_widget], widget_current_value);
+                        }
+                    }
+
+                    ESP_LOGI(TAG, "End of touch");
                     touching = false;
                     active_widget = -1;
                     continue;

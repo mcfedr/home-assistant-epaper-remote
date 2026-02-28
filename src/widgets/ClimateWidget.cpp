@@ -5,6 +5,7 @@
 #include "climate_value.h"
 #include "constants.h"
 #include <FastEPD.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -103,10 +104,9 @@ static const char* climate_mode_label(ClimateMode mode) {
 
 static void draw_mode_button(FASTEPD* display, const Rect* rect, const char* label, bool active, uint8_t white) {
     const uint8_t fill = active ? BBEP_BLACK : white;
-    if (rect->w > 2 && rect->h > 2) {
-        display->fillRect(rect->x + 1, rect->y + 1, rect->w - 2, rect->h - 2, fill);
-    }
-    display->drawRect(rect->x, rect->y, rect->w, rect->h, BBEP_BLACK);
+    const int16_t radius = std::max<int16_t>(6, std::min<int16_t>(12, static_cast<int16_t>(rect->h / 3)));
+    display->fillRoundRect(rect->x, rect->y, rect->w, rect->h, radius, fill);
+    display->drawRoundRect(rect->x, rect->y, rect->w, rect->h, radius, BBEP_BLACK);
 
     display->setTextColor(active ? white : BBEP_BLACK);
     display->setFont(Montserrat_Regular_16);
@@ -138,14 +138,14 @@ ClimateWidget::ClimateWidget(const char* label, Rect rect, uint8_t climate_mode_
                           rect_h + 2 * TOUCH_AREA_MARGIN);
 
     const int16_t pad = 14;
-    const int16_t row_gap = 10;
+    const int16_t row_gap = 12;
 
-    const int16_t label_h = 32;
+    const int16_t label_h = 36;
     const int16_t label_y = rect_y + 10;
     label_rect_ = make_rect(rect_x + pad, label_y, rect_w - 2 * pad, label_h);
 
     const int16_t mode_y = label_y + label_h + row_gap;
-    int16_t controls_h = 72;
+    int16_t controls_h = std::max<int16_t>(72, rect_h * 3 / 10);
     int16_t controls_y = rect_y + rect_h - 14 - controls_h;
     int16_t mode_h = controls_y - row_gap - mode_y;
     if (mode_h < 54) {
@@ -201,8 +201,8 @@ Rect ClimateWidget::partialDraw(FASTEPD* display, BitDepth depth, uint8_t from, 
 
 void ClimateWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
     const uint8_t white = depth == BitDepth::BD_4BPP ? 0xf : BBEP_WHITE;
-    display->fillRect(rect_.x, rect_.y, rect_.w, rect_.h, white);
-    display->drawRect(rect_.x, rect_.y, rect_.w, rect_.h, BBEP_BLACK);
+    display->fillRoundRect(rect_.x, rect_.y, rect_.w, rect_.h, 18, white);
+    display->drawRoundRect(rect_.x, rect_.y, rect_.w, rect_.h, 18, BBEP_BLACK);
     display->setTextColor(BBEP_BLACK);
 
     char draw_label[MAX_ENTITY_NAME_LEN];
@@ -211,10 +211,7 @@ void ClimateWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
 
     display->setFont(Montserrat_Regular_20);
     truncate_with_ellipsis(display, draw_label, sizeof(draw_label), static_cast<int16_t>(label_rect_.w));
-    BB_RECT label_box = get_text_box(display, draw_label);
-    const int16_t label_y = static_cast<int16_t>(label_rect_.y) + static_cast<int16_t>(label_rect_.h + label_box.h) / 2 - 2;
-    display->setCursor(label_rect_.x, label_y);
-    display->write(draw_label);
+    draw_centered_text(display, draw_label, &label_rect_);
 
     ClimateMode mode = climate_unpack_mode(value);
     bool mode_visible = false;
@@ -235,9 +232,12 @@ void ClimateWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
         draw_mode_button(display, &mode_rects_[i], climate_mode_label(button_mode), button_mode == mode, white);
     }
 
-    display->drawRect(minus_rect_.x, minus_rect_.y, minus_rect_.w, minus_rect_.h, BBEP_BLACK);
-    display->drawRect(plus_rect_.x, plus_rect_.y, plus_rect_.w, plus_rect_.h, BBEP_BLACK);
-    display->drawRect(temp_adjust_value_rect_.x, temp_adjust_value_rect_.y, temp_adjust_value_rect_.w, temp_adjust_value_rect_.h, BBEP_BLACK);
+    display->fillRoundRect(minus_rect_.x, minus_rect_.y, minus_rect_.w, minus_rect_.h, 12, white);
+    display->fillRoundRect(plus_rect_.x, plus_rect_.y, plus_rect_.w, plus_rect_.h, 12, white);
+    display->fillRoundRect(temp_adjust_value_rect_.x, temp_adjust_value_rect_.y, temp_adjust_value_rect_.w, temp_adjust_value_rect_.h, 12, white);
+    display->drawRoundRect(minus_rect_.x, minus_rect_.y, minus_rect_.w, minus_rect_.h, 12, BBEP_BLACK);
+    display->drawRoundRect(plus_rect_.x, plus_rect_.y, plus_rect_.w, plus_rect_.h, 12, BBEP_BLACK);
+    display->drawRoundRect(temp_adjust_value_rect_.x, temp_adjust_value_rect_.y, temp_adjust_value_rect_.w, temp_adjust_value_rect_.h, 12, BBEP_BLACK);
 
     display->setFont(Montserrat_Regular_26);
     draw_centered_text(display, "-", &minus_rect_, -2);

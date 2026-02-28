@@ -1,4 +1,5 @@
 #include "store.h"
+#include "boards.h"
 #include "climate_value.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -148,6 +149,100 @@ static uint8_t room_count_for_floor_locked(const EntityStore* store, int8_t floo
     return count;
 }
 
+static bool entity_visible_in_room_controls_locked(const EntityStore* store, uint8_t entity_idx) {
+    const HomeAssistantEntity& entity = store->entities[entity_idx];
+    if (entity.command_type == CommandType::SetClimateModeAndTemperature) {
+        return entity.climate_hvac_modes_known && entity.climate_is_ac;
+    }
+    return true;
+}
+
+static uint16_t room_controls_light_height_locked(const EntityStore* store, int8_t room_idx) {
+    (void)store;
+    (void)room_idx;
+    return ROOM_CONTROLS_LIGHT_MIN_HEIGHT;
+}
+
+static uint8_t room_controls_page_count_locked(const EntityStore* store, int8_t room_idx) {
+    if (room_idx < 0 || room_idx >= static_cast<int8_t>(store->room_count)) {
+        return 1;
+    }
+
+    const Room& room = store->rooms[room_idx];
+    if (room.entity_count == 0) {
+        return 1;
+    }
+
+    const uint16_t light_height = room_controls_light_height_locked(store, room_idx);
+    const uint16_t display_bottom = DISPLAY_HEIGHT - ROOM_CONTROLS_BOTTOM_PADDING;
+
+    uint8_t page_count = 1;
+    uint16_t pos_y = ROOM_CONTROLS_ITEM_START_Y;
+    uint8_t light_col = 0;
+    bool impossible = false;
+
+    auto start_new_page = [&]() {
+        if (page_count < 255) {
+            page_count++;
+        }
+        pos_y = ROOM_CONTROLS_ITEM_START_Y;
+        light_col = 0;
+    };
+
+    auto place_entity = [&](bool is_climate) {
+        while (true) {
+            if (is_climate) {
+                uint16_t row_y = pos_y;
+                if (light_col != 0) {
+                    row_y = static_cast<uint16_t>(row_y + light_height + ROOM_CONTROLS_ITEM_GAP);
+                }
+                if (row_y + ROOM_CONTROLS_CLIMATE_HEIGHT <= display_bottom) {
+                    pos_y = static_cast<uint16_t>(row_y + ROOM_CONTROLS_CLIMATE_HEIGHT + ROOM_CONTROLS_ITEM_GAP);
+                    light_col = 0;
+                    return;
+                }
+                if (row_y == ROOM_CONTROLS_ITEM_START_Y && light_col == 0) {
+                    impossible = true;
+                    return;
+                }
+                start_new_page();
+            } else {
+                if (pos_y + light_height <= display_bottom) {
+                    if (light_col == 0) {
+                        light_col = 1;
+                    } else {
+                        light_col = 0;
+                        pos_y = static_cast<uint16_t>(pos_y + light_height + ROOM_CONTROLS_ITEM_GAP);
+                    }
+                    return;
+                }
+                if (pos_y == ROOM_CONTROLS_ITEM_START_Y && light_col == 0) {
+                    impossible = true;
+                    return;
+                }
+                start_new_page();
+            }
+        }
+    };
+
+    for (uint8_t pass = 0; pass < 2 && !impossible; pass++) {
+        const bool climate_pass = pass == 0;
+        for (uint8_t i = 0; i < room.entity_count && !impossible; i++) {
+            uint8_t entity_idx = room.entity_ids[i];
+            if (!entity_visible_in_room_controls_locked(store, entity_idx)) {
+                continue;
+            }
+            const bool is_climate = store->entities[entity_idx].command_type == CommandType::SetClimateModeAndTemperature;
+            if (is_climate != climate_pass) {
+                continue;
+            }
+            place_entity(is_climate);
+        }
+    }
+
+    return page_count;
+}
+
 void store_init(EntityStore* store) {
     store->mutex = xSemaphoreCreateMutex();
     store->event_group = xEventGroupCreate();
@@ -247,6 +342,7 @@ void store_begin_room_sync(EntityStore* store) {
     store->floor_list_page = 0;
     store->selected_room = -1;
     store->room_list_page = 0;
+    store->room_controls_page = 0;
     store->rooms_loaded = false;
     store->rooms_revision++;
     xSemaphoreGive(store->mutex);
@@ -278,7 +374,15 @@ void store_finish_room_sync(EntityStore* store) {
         if (store->selected_room >= static_cast<int8_t>(store->room_count) ||
             store->rooms[store->selected_room].floor_idx != store->selected_floor) {
             store->selected_room = -1;
+            store->room_controls_page = 0;
+        } else {
+            uint8_t room_controls_pages = room_controls_page_count_locked(store, store->selected_room);
+            if (store->room_controls_page >= room_controls_pages) {
+                store->room_controls_page = room_controls_pages - 1;
+            }
         }
+    } else {
+        store->room_controls_page = 0;
     }
 
     store->rooms_loaded = true;
@@ -373,6 +477,8 @@ int8_t store_add_entity_to_room(EntityStore* store, uint8_t room_idx, EntityConf
         new_entity.command_type = entity.command_type;
         if (new_entity.command_type == CommandType::SetClimateModeAndTemperature) {
             new_entity.climate_mode_mask = CLIMATE_MODE_MASK_DEFAULT;
+            new_entity.climate_hvac_modes_known = false;
+            new_entity.climate_is_ac = false;
             new_entity.current_value = climate_pack_value(ClimateMode::Off, climate_celsius_to_steps(20.0f));
         }
     } else if (display_name && display_name[0]) {
@@ -421,6 +527,7 @@ bool store_select_room(EntityStore* store, int8_t room_idx) {
     }
 
     store->selected_room = room_idx;
+    store->room_controls_page = 0;
     store->rooms_revision++;
     xSemaphoreGive(store->mutex);
     notify_ui(store);
@@ -443,9 +550,35 @@ bool store_select_floor(EntityStore* store, int8_t floor_idx) {
     store->selected_floor = floor_idx;
     store->selected_room = -1;
     store->room_list_page = 0;
+    store->room_controls_page = 0;
     store->rooms_revision++;
     xSemaphoreGive(store->mutex);
     notify_ui(store);
+    return true;
+}
+
+bool store_go_home(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+
+    const bool changed = store->selected_floor != -1 || store->selected_room != -1 || store->floor_list_page != 0 ||
+                         store->room_list_page != 0 || store->room_controls_page != 0;
+
+    store->selected_floor = -1;
+    store->selected_room = -1;
+    store->floor_list_page = 0;
+    store->room_list_page = 0;
+    store->room_controls_page = 0;
+
+    if (changed) {
+        store->rooms_revision++;
+    }
+
+    xSemaphoreGive(store->mutex);
+
+    if (changed) {
+        notify_ui(store);
+    }
+
     return true;
 }
 
@@ -494,6 +627,34 @@ bool store_shift_room_list_page(EntityStore* store, int8_t delta) {
     }
 
     store->room_list_page = static_cast<uint8_t>(page);
+    store->rooms_revision++;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+    return true;
+}
+
+bool store_shift_room_controls_page(EntityStore* store, int8_t delta) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+
+    if (store->selected_room < 0 || store->selected_room >= static_cast<int8_t>(store->room_count)) {
+        xSemaphoreGive(store->mutex);
+        return false;
+    }
+
+    int16_t page = static_cast<int16_t>(store->room_controls_page) + delta;
+    uint8_t pages = room_controls_page_count_locked(store, store->selected_room);
+    if (page < 0) {
+        page = 0;
+    } else if (page >= pages) {
+        page = pages - 1;
+    }
+
+    if (store->room_controls_page == static_cast<uint8_t>(page)) {
+        xSemaphoreGive(store->mutex);
+        return false;
+    }
+
+    store->room_controls_page = static_cast<uint8_t>(page);
     store->rooms_revision++;
     xSemaphoreGive(store->mutex);
     notify_ui(store);
@@ -553,9 +714,14 @@ bool store_get_room_controls_snapshot(EntityStore* store, int8_t room_idx, RoomC
 
     Room& room = store->rooms[room_idx];
     copy_string(snapshot->room_name, sizeof(snapshot->room_name), room.name);
-    snapshot->entity_count = room.entity_count;
-    if (room.entity_count > MAX_WIDGETS_PER_SCREEN) {
-        snapshot->entity_count = MAX_WIDGETS_PER_SCREEN;
+    for (uint8_t i = 0; i < room.entity_count; i++) {
+        uint8_t entity_idx = room.entity_ids[i];
+        if (entity_visible_in_room_controls_locked(store, entity_idx)) {
+            snapshot->entity_count++;
+        }
+    }
+    if (snapshot->entity_count > MAX_ENTITIES) {
+        snapshot->entity_count = MAX_ENTITIES;
         snapshot->truncated = true;
     }
 
@@ -575,12 +741,18 @@ bool store_get_room_controls_snapshot(EntityStore* store, int8_t room_idx, RoomC
     // Always place climate widgets first in the room controls list.
     for (uint8_t i = 0; i < room.entity_count && snapshot_idx < snapshot->entity_count; i++) {
         uint8_t entity_idx = room.entity_ids[i];
+        if (!entity_visible_in_room_controls_locked(store, entity_idx)) {
+            continue;
+        }
         if (store->entities[entity_idx].command_type == CommandType::SetClimateModeAndTemperature) {
             append_entity_to_snapshot(entity_idx);
         }
     }
     for (uint8_t i = 0; i < room.entity_count && snapshot_idx < snapshot->entity_count; i++) {
         uint8_t entity_idx = room.entity_ids[i];
+        if (!entity_visible_in_room_controls_locked(store, entity_idx)) {
+            continue;
+        }
         if (store->entities[entity_idx].command_type != CommandType::SetClimateModeAndTemperature) {
             append_entity_to_snapshot(entity_idx);
         }
@@ -597,6 +769,7 @@ void store_update_ui_state(EntityStore* store, const Screen* screen, UIState* ui
     ui_state->selected_room = store->selected_room;
     ui_state->floor_list_page = store->floor_list_page;
     ui_state->room_list_page = store->room_list_page;
+    ui_state->room_controls_page = store->room_controls_page;
     ui_state->rooms_revision = store->rooms_revision;
 
     // Handle wifi and home assistant state first
@@ -670,6 +843,8 @@ EntityRef store_add_entity(EntityStore* store, EntityConfig entity) {
     new_entity.command_type = entity.command_type;
     if (new_entity.command_type == CommandType::SetClimateModeAndTemperature) {
         new_entity.climate_mode_mask = CLIMATE_MODE_MASK_DEFAULT;
+        new_entity.climate_hvac_modes_known = false;
+        new_entity.climate_is_ac = false;
         new_entity.current_value = climate_pack_value(ClimateMode::Off, climate_celsius_to_steps(20.0f));
     }
 

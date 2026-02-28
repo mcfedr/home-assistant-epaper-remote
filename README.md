@@ -38,6 +38,67 @@ In Home Assistant:
 
 Copy `src/config_remote.cpp.example` to `src/config_remote.cpp` then update the file accordingly.
 
+## PlatformIO command quick reference
+
+Run commands from the project root.
+
+### Environments
+
+- `lilygo-t5-s3` for Lilygo T5 E-Paper S3 Pro
+- `m5-papers3` for M5Paper S3
+
+### Common commands (Lilygo)
+
+- Build only:
+
+```bash
+pio run -e lilygo-t5-s3
+```
+
+- Flash firmware:
+
+```bash
+pio run -e lilygo-t5-s3 -t upload
+```
+
+- Open serial monitor:
+
+```bash
+pio run -e lilygo-t5-s3 -t monitor
+```
+
+- Flash and then monitor in one command:
+
+```bash
+pio run -e lilygo-t5-s3 -t upload -t monitor
+```
+
+### Common commands (M5Paper)
+
+- Build only:
+
+```bash
+pio run -e m5-papers3
+```
+
+- Flash firmware:
+
+```bash
+pio run -e m5-papers3 -t upload
+```
+
+- Serial monitor:
+
+```bash
+pio run -e m5-papers3 -t monitor
+```
+
+### Useful notes
+
+- Exit monitor with `Ctrl+C`.
+- If upload fails with a busy serial port, close monitor and run upload again.
+- The Lilygo environment enables `esp32_exception_decoder` in monitor filters, so stack traces are decoded automatically.
+
 ## Notes
 
 ### Getting more logs
@@ -64,6 +125,5 @@ This repository contains resources from:
 
 - https://github.com/Templarian/MaterialDesign (SIL OPEN FONT LICENSE Version 1.1)
 - https://github.com/JulietaUla/Montserrat (Apache License 2.0)
-
 
 

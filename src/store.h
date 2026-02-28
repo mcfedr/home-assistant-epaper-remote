@@ -22,6 +22,8 @@ struct HomeAssistantEntity {
     char display_name[MAX_ENTITY_NAME_LEN];
     CommandType command_type;
     uint8_t climate_mode_mask;
+    bool climate_hvac_modes_known;
+    bool climate_is_ac;
     uint8_t current_value;
     uint8_t command_value;
     bool command_pending;
@@ -69,10 +71,10 @@ struct RoomListSnapshot {
 struct RoomControlsSnapshot {
     char room_name[MAX_ROOM_NAME_LEN];
     uint8_t entity_count;
-    uint8_t entity_ids[MAX_WIDGETS_PER_SCREEN];
-    CommandType entity_types[MAX_WIDGETS_PER_SCREEN];
-    uint8_t entity_climate_mode_masks[MAX_WIDGETS_PER_SCREEN];
-    char entity_names[MAX_WIDGETS_PER_SCREEN][MAX_ENTITY_NAME_LEN];
+    uint8_t entity_ids[MAX_ENTITIES];
+    CommandType entity_types[MAX_ENTITIES];
+    uint8_t entity_climate_mode_masks[MAX_ENTITIES];
+    char entity_names[MAX_ENTITIES][MAX_ENTITY_NAME_LEN];
     bool truncated;
 };
 
@@ -89,6 +91,7 @@ struct EntityStore {
     uint8_t room_count;
     int8_t selected_room = -1;
     uint8_t room_list_page = 0;
+    uint8_t room_controls_page = 0;
     bool rooms_loaded = false;
     uint32_t rooms_revision = 0;
 
@@ -125,8 +128,10 @@ int16_t store_find_room(EntityStore* store, const char* room_name);
 int8_t store_add_entity_to_room(EntityStore* store, uint8_t room_idx, EntityConfig entity, const char* display_name);
 bool store_select_floor(EntityStore* store, int8_t floor_idx);
 bool store_select_room(EntityStore* store, int8_t room_idx);
+bool store_go_home(EntityStore* store);
 bool store_shift_floor_list_page(EntityStore* store, int8_t delta);
 bool store_shift_room_list_page(EntityStore* store, int8_t delta);
+bool store_shift_room_controls_page(EntityStore* store, int8_t delta);
 uint8_t store_get_room_count(EntityStore* store);
 void store_get_floor_list_snapshot(EntityStore* store, FloorListSnapshot* snapshot);
 bool store_get_room_list_snapshot(EntityStore* store, int8_t floor_idx, RoomListSnapshot* snapshot);

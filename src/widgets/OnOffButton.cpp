@@ -91,33 +91,49 @@ OnOffButton::OnOffButton(const char* label, const uint8_t* on_icon, const uint8_
     }
 
     constexpr int16_t pad_x = 8;
-    constexpr int16_t pad_top = 6;
-    constexpr int16_t label_gap = 8;
-    constexpr int16_t label_h = 30;
-    constexpr int16_t bottom_pad = 6;
+    int16_t pad_top = rect_.h >= 120 ? 6 : 3;
+    int16_t bottom_pad = rect_.h >= 120 ? 6 : 3;
+    int16_t label_gap = rect_.h >= 120 ? 8 : 4;
+    int16_t label_h = rect_.h >= 150 ? 30 : (rect_.h >= 120 ? 24 : 20);
 
-    const int16_t max_icon_w = std::max<int16_t>(BUTTON_ICON_SIZE + 6, static_cast<int16_t>(rect_.w) - 2 * pad_x);
-    const int16_t max_icon_h =
-        std::max<int16_t>(BUTTON_ICON_SIZE + 6, static_cast<int16_t>(rect_.h) - (pad_top + label_gap + label_h + bottom_pad));
-    sprite_size_ = static_cast<uint16_t>(std::min(max_icon_w, max_icon_h));
+    int16_t max_icon_h = static_cast<int16_t>(rect_.h) - (pad_top + label_gap + label_h + bottom_pad);
+    if (max_icon_h < BUTTON_ICON_SIZE) {
+        while (max_icon_h < BUTTON_ICON_SIZE && label_gap > 2) {
+            label_gap--;
+            max_icon_h++;
+        }
+        while (max_icon_h < BUTTON_ICON_SIZE && pad_top > 1) {
+            pad_top--;
+            max_icon_h++;
+        }
+        while (max_icon_h < BUTTON_ICON_SIZE && bottom_pad > 1) {
+            bottom_pad--;
+            max_icon_h++;
+        }
+    }
+
+    const int16_t max_icon_w = std::max<int16_t>(BUTTON_ICON_SIZE, static_cast<int16_t>(rect_.w) - 2 * pad_x);
+    max_icon_h = std::max<int16_t>(BUTTON_ICON_SIZE, max_icon_h);
+    const int16_t desired_sprite = std::min(max_icon_w, max_icon_h);
+    // Keep sprite RAM roughly stable even when widget cards get taller.
+    const int16_t sprite_cap = BUTTON_SIZE;
+    const int16_t min_sprite = BUTTON_ICON_SIZE;
+    const int16_t clamped_sprite = std::max<int16_t>(min_sprite, std::min<int16_t>(desired_sprite, sprite_cap));
+    sprite_size_ = static_cast<uint16_t>(clamped_sprite);
 
     icon_rect_ = Rect{
         .x = static_cast<uint16_t>(rect_.x + (rect_.w - sprite_size_) / 2),
-        .y = static_cast<uint16_t>(rect_.y + pad_top),
+        .y = static_cast<uint16_t>(rect_.y + pad_top + (max_icon_h - sprite_size_) / 2),
         .w = sprite_size_,
         .h = sprite_size_,
     };
 
-    const uint16_t label_y = static_cast<uint16_t>(icon_rect_.y + icon_rect_.h + label_gap);
-    uint16_t label_h_actual = static_cast<uint16_t>(rect_.y + rect_.h > label_y + bottom_pad ? rect_.y + rect_.h - label_y - bottom_pad : label_h);
-    if (label_h_actual < 10) {
-        label_h_actual = 10;
-    }
+    const uint16_t label_y = static_cast<uint16_t>(rect_.y + rect_.h - bottom_pad - label_h);
     label_rect_ = Rect{
         .x = static_cast<uint16_t>(rect_.x + 4),
         .y = label_y,
         .w = static_cast<uint16_t>(rect_.w > 8 ? rect_.w - 8 : rect_.w),
-        .h = label_h_actual,
+        .h = static_cast<uint16_t>(std::max<int16_t>(16, label_h)),
     };
 
     const uint16_t icon_center = sprite_size_ / 2;
@@ -180,6 +196,14 @@ Rect OnOffButton::partialDraw(FASTEPD* display, BitDepth depth, uint8_t from, ui
 }
 
 void OnOffButton::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
+    const uint8_t white = depth == BitDepth::BD_4BPP ? 0xf : BBEP_WHITE;
+    display->fillRoundRect(rect_.x, rect_.y, rect_.w, rect_.h, 18, white);
+    display->drawRoundRect(rect_.x, rect_.y, rect_.w, rect_.h, 18, BBEP_BLACK);
+    if (label_rect_.y > rect_.y + 6) {
+        const int16_t divider_y = static_cast<int16_t>(label_rect_.y) - 4;
+        display->drawLine(rect_.x + 12, divider_y, rect_.x + rect_.w - 12, divider_y, BBEP_BLACK);
+    }
+
     partialDraw(display, depth, 0, value);
 
     // Fit the label in one centered line below the icon.
@@ -191,7 +215,7 @@ void OnOffButton::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
     for (uint8_t idx = 0; idx <= 3; idx++) {
         set_label_font(display, idx);
         BB_RECT text_rect = get_text_box(display, draw_label);
-        if (text_rect.w <= max_w) {
+        if (text_rect.w <= max_w && text_rect.h <= label_rect_.h) {
             font_idx = idx;
             break;
         }

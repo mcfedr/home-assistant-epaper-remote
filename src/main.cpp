@@ -9,9 +9,12 @@
 #include "store.h"
 #include "ui_state.h"
 #include "widgets/Slider.h"
+#include <Arduino.h>
 #include <FastEPD.h>
+#include <esp_log.h>
 
 static Configuration config;
+static const char* TAG = "main";
 
 static FASTEPD epaper;
 static Screen screen;
@@ -57,8 +60,31 @@ void setup() {
     touch_task_args.state = &shared_ui_state;
     touch_task_args.store = &store;
     xTaskCreate(touch_task, "touch", 4096, &touch_task_args, 1, nullptr);
+
+    if (HOME_BUTTON_PIN >= 0) {
+        if (HOME_BUTTON_ACTIVE_LOW) {
+            pinMode(HOME_BUTTON_PIN, INPUT_PULLUP);
+        } else {
+            pinMode(HOME_BUTTON_PIN, INPUT);
+        }
+    }
 }
 
 void loop() {
-    vTaskDelay(portMAX_DELAY); // Nothing to do here
+    if (HOME_BUTTON_PIN < 0) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        return;
+    }
+
+    static bool was_pressed = false;
+    const int raw_level = digitalRead(HOME_BUTTON_PIN);
+    const bool pressed = HOME_BUTTON_ACTIVE_LOW ? raw_level == LOW : raw_level == HIGH;
+
+    if (pressed && !was_pressed) {
+        ESP_LOGI(TAG, "Home button pressed");
+        store_go_home(&store);
+    }
+
+    was_pressed = pressed;
+    vTaskDelay(pdMS_TO_TICKS(25));
 }
