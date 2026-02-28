@@ -50,6 +50,8 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
 ### 4.3 Floor and Room List Screens
 
 - Floor list and room list must render as a grid of tile cards.
+- Home (floor list) layout must adapt to the number of floors shown on the current page.
+  - When only a few floors are present (for example 3), cards should expand to use the full available space as large, easy-to-tap buttons.
 - Grid supports paging by horizontal swipe:
   - Swipe left = next page
   - Swipe right = previous page
@@ -67,6 +69,9 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
   - Back icon button
   - Current room name
   - Page indicator (for multi-page rooms)
+- Header styling must prioritize readability:
+  - Use the lighter high-contrast style already used on the "Choose a room" page.
+  - Avoid dark header backgrounds that reduce room-title legibility.
 - Entity ordering on each room page:
   - Climate widgets first
   - Light widgets after climate widgets
@@ -111,6 +116,12 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
 - Swipes must not accidentally trigger control toggles.
 - Swipe threshold must be high enough to distinguish intentional page navigation from taps.
 
+### 4.9 Text Rendering and Typography
+
+- All UI text must render complete, readable glyphs for the supported character set.
+- Lowercase letters must render correctly in all labels and headers (including lowercase `l`).
+- Text rendering quality at small sizes must remain legible without dropping or clipping characters.
+
 ### 4.10 Hardware Home Button
 
 - Lilygo T5 E-Paper S3 Pro front home button must be supported.
@@ -119,7 +130,17 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
 - A home button press must call the same navigation action as `go home` in the store (reset selected floor/room and list pages).
 - Hardware without this front button may omit the feature, but must still compile and run without errors.
 
-### 4.9 State Synchronization
+### 4.11 Cover Widget Requirements
+
+- Cover entities must be supported on room control pages.
+- Cover display should prioritize room-level group covers and avoid showing every individual cover device.
+- The implementation must support exceptions for important single covers (for example, a projector screen) so they can still be shown even when group-only filtering is enabled.
+- Cover widget controls must include at least:
+  - `Up/Open`
+  - `Down/Close`
+- Cover widgets should follow a clean, minimal visual style aligned with other room widgets.
+
+### 4.12 State Synchronization
 
 - Device must subscribe to Home Assistant updates and refresh widget states.
 - Commands sent from touch interactions must update Home Assistant entities.
@@ -163,6 +184,10 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
 - Dense rooms with many controls are navigable using room control pages.
 - Climate controls support mode switching and +/-0.5 degree temperature changes.
 - Light controls remain fully visible (no overflow), tappable, and responsive.
+- Floor list uses available space effectively (for example, 3 floors shown as 3 large home buttons).
+- UI text renders complete lowercase and uppercase glyphs with no missing letters.
+- Room page headers remain readable with the same high-contrast style as the room-selection header.
+- Cover controls are usable in rooms, showing group covers by default with up/down controls, while allowing configured single-cover exceptions such as a projector screen.
 - Back navigation works consistently between all navigation levels.
 - Front home button returns to the floor list root from room list or room controls.
 - UI reflects external Home Assistant state changes after initial load.

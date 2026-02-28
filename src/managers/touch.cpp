@@ -163,7 +163,36 @@ static int8_t list_swipe_delta(const TouchEvent* start_touch, const TouchEvent* 
     return dx < 0 ? 1 : -1;
 }
 
-static int16_t list_index_from_touch(const TouchEvent* touch_event, uint8_t item_count, uint8_t list_page, uint16_t grid_start_y) {
+struct ListGridLayout {
+    int16_t columns;
+    int16_t rows;
+    int16_t items_per_page;
+};
+
+static ListGridLayout list_grid_layout(uint8_t item_count, uint8_t page_count, bool expand_single_page_layout) {
+    ListGridLayout layout = {
+        .columns = ROOM_LIST_COLUMNS,
+        .rows = ROOM_LIST_ROWS,
+        .items_per_page = ROOM_LIST_ROOMS_PER_PAGE,
+    };
+
+    if (!expand_single_page_layout || page_count != 1 || item_count == 0 || item_count > ROOM_LIST_ROOMS_PER_PAGE) {
+        return layout;
+    }
+
+    if (item_count <= 3) {
+        layout.columns = 1;
+        layout.rows = item_count;
+    } else {
+        layout.columns = 2;
+        layout.rows = static_cast<int16_t>((item_count + 1) / 2);
+    }
+    layout.items_per_page = layout.columns * layout.rows;
+    return layout;
+}
+
+static int16_t list_index_from_touch(const TouchEvent* touch_event, uint8_t item_count, uint8_t list_page, uint16_t grid_start_y,
+                                     bool expand_single_page_layout) {
     if (touch_event->x < ROOM_LIST_GRID_MARGIN_X || touch_event->x >= DISPLAY_WIDTH - ROOM_LIST_GRID_MARGIN_X) {
         return -1;
     }
@@ -173,11 +202,12 @@ static int16_t list_index_from_touch(const TouchEvent* touch_event, uint8_t item
 
     const uint8_t page_count = item_count == 0 ? 1 : static_cast<uint8_t>((item_count + ROOM_LIST_ROOMS_PER_PAGE - 1) / ROOM_LIST_ROOMS_PER_PAGE);
     const uint8_t page = list_page >= page_count ? static_cast<uint8_t>(page_count - 1) : list_page;
+    const ListGridLayout layout = list_grid_layout(item_count, page_count, expand_single_page_layout);
 
     const int16_t grid_w = DISPLAY_WIDTH - 2 * ROOM_LIST_GRID_MARGIN_X;
     const int16_t grid_h = ROOM_LIST_GRID_BOTTOM_Y - grid_start_y;
-    const int16_t tile_w = (grid_w - (ROOM_LIST_COLUMNS - 1) * ROOM_LIST_GRID_GAP_X) / ROOM_LIST_COLUMNS;
-    const int16_t tile_h = (grid_h - (ROOM_LIST_ROWS - 1) * ROOM_LIST_GRID_GAP_Y) / ROOM_LIST_ROWS;
+    const int16_t tile_w = (grid_w - (layout.columns - 1) * ROOM_LIST_GRID_GAP_X) / layout.columns;
+    const int16_t tile_h = (grid_h - (layout.rows - 1) * ROOM_LIST_GRID_GAP_Y) / layout.rows;
 
     const int16_t rel_x = touch_event->x - ROOM_LIST_GRID_MARGIN_X;
     const int16_t rel_y = touch_event->y - grid_start_y;
@@ -186,7 +216,7 @@ static int16_t list_index_from_touch(const TouchEvent* touch_event, uint8_t item
     const int16_t row_stride = tile_h + ROOM_LIST_GRID_GAP_Y;
     const int16_t col = rel_x / col_stride;
     const int16_t row = rel_y / row_stride;
-    if (col < 0 || col >= ROOM_LIST_COLUMNS || row < 0 || row >= ROOM_LIST_ROWS) {
+    if (col < 0 || col >= layout.columns || row < 0 || row >= layout.rows) {
         return -1;
     }
 
@@ -196,8 +226,8 @@ static int16_t list_index_from_touch(const TouchEvent* touch_event, uint8_t item
         return -1;
     }
 
-    const int16_t slot = row * ROOM_LIST_COLUMNS + col;
-    const int16_t item_idx = page * ROOM_LIST_ROOMS_PER_PAGE + slot;
+    const int16_t slot = row * layout.columns + col;
+    const int16_t item_idx = page * layout.items_per_page + slot;
     return item_idx < item_count ? item_idx : -1;
 }
 
@@ -334,7 +364,7 @@ void touch_task(void* arg) {
                         } else {
                             store_get_floor_list_snapshot(store, &floor_list_snapshot);
                             int16_t floor_idx = list_index_from_touch(&touch_start, floor_list_snapshot.floor_count,
-                                                                      ui_state->floor_list_page, FLOOR_LIST_GRID_START_Y);
+                                                                      ui_state->floor_list_page, FLOOR_LIST_GRID_START_Y, true);
                             if (floor_idx >= 0) {
                                 ESP_LOGI(TAG, "Selecting floor %d", floor_idx);
                                 store_select_floor(store, static_cast<int8_t>(floor_idx));
@@ -347,7 +377,7 @@ void touch_task(void* arg) {
                             }
                         } else if (store_get_room_list_snapshot(store, ui_state->selected_floor, &room_list_snapshot)) {
                             int16_t room_list_idx = list_index_from_touch(&touch_start, room_list_snapshot.room_count,
-                                                                          ui_state->room_list_page, ROOM_LIST_GRID_START_Y);
+                                                                          ui_state->room_list_page, ROOM_LIST_GRID_START_Y, false);
                             if (room_list_idx >= 0) {
                                 int8_t room_idx = room_list_snapshot.room_indices[room_list_idx];
                                 ESP_LOGI(TAG, "Selecting room %d", room_idx);

@@ -43,7 +43,17 @@ struct ClimateConfig {
     uint16_t height;
 };
 
+struct CoverConfig {
+    EntityRef entity_ref;
+    const char* label;
+    uint16_t pos_x;
+    uint16_t pos_y;
+    uint16_t width;
+    uint16_t height;
+};
+
 void screen_add_slider(SliderConfig config, Screen* screen);
 void screen_add_button(ButtonConfig config, Screen* screen);
 void screen_add_climate(ClimateConfig config, Screen* screen);
+void screen_add_cover(CoverConfig config, Screen* screen);
 void screen_clear(Screen* screen);

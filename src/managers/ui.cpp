@@ -168,6 +168,15 @@ static BB_RECT get_text_box(FASTEPD* epaper, const char* text) {
     return rect;
 }
 
+static void draw_text_at(FASTEPD* epaper, int16_t x, int16_t y, const char* text, bool reinforce = false) {
+    epaper->setCursor(x, y);
+    epaper->write(text);
+    if (reinforce) {
+        epaper->setCursor(x + 1, y);
+        epaper->write(text);
+    }
+}
+
 static void trim_copy(char* dst, size_t dst_len, const char* src, size_t len) {
     size_t start = 0;
     while (start < len && src[start] == ' ') {
@@ -327,12 +336,11 @@ static void ui_draw_room_tile_label(FASTEPD* epaper, int16_t label_x, int16_t la
     const int16_t gap = font_idx == 0 ? 10 : 4;
     const int16_t total_h = two_lines ? static_cast<int16_t>(rect1.h + rect2.h + gap) : rect1.h;
     const int16_t top = label_y + (label_h - total_h) / 2;
-    epaper->setCursor(label_x + (label_w - rect1.w) / 2, top);
-    epaper->write(line1);
+    const bool reinforce = font_idx != 0;
+    draw_text_at(epaper, label_x + (label_w - rect1.w) / 2, top, line1, reinforce);
 
     if (two_lines) {
-        epaper->setCursor(label_x + (label_w - rect2.w) / 2, top + rect1.h + gap);
-        epaper->write(line2);
+        draw_text_at(epaper, label_x + (label_w - rect2.w) / 2, top + rect1.h + gap, line2, reinforce);
     }
 }
 
@@ -372,12 +380,10 @@ static void ui_draw_floor_list_header(FASTEPD* epaper) {
     epaper->loadBMP(home_outline, icon_x, icon_y, 0xf, BBEP_BLACK);
 
     epaper->setFont(Montserrat_Regular_26);
-    epaper->setCursor(text_x, header_y + 42);
-    epaper->write("Home");
+    draw_text_at(epaper, text_x, header_y + 42, "Home");
 
     epaper->setFont(Montserrat_Regular_16);
-    epaper->setCursor(text_x, header_y + 68);
-    epaper->write("Choose a floor");
+    draw_text_at(epaper, text_x, header_y + 68, "Choose a floor", true);
 }
 
 static uint8_t list_page_count(uint8_t item_count) {
@@ -387,22 +393,51 @@ static uint8_t list_page_count(uint8_t item_count) {
     return static_cast<uint8_t>((item_count + ROOM_LIST_ROOMS_PER_PAGE - 1) / ROOM_LIST_ROOMS_PER_PAGE);
 }
 
+struct ListGridLayout {
+    uint8_t columns;
+    uint8_t rows;
+    uint8_t items_per_page;
+};
+
+static ListGridLayout list_grid_layout(uint8_t item_count, uint8_t page_count, bool expand_single_page_layout) {
+    ListGridLayout layout = {
+        .columns = ROOM_LIST_COLUMNS,
+        .rows = ROOM_LIST_ROWS,
+        .items_per_page = ROOM_LIST_ROOMS_PER_PAGE,
+    };
+
+    if (!expand_single_page_layout || page_count != 1 || item_count == 0 || item_count > ROOM_LIST_ROOMS_PER_PAGE) {
+        return layout;
+    }
+
+    if (item_count <= 3) {
+        layout.columns = 1;
+        layout.rows = item_count;
+    } else {
+        layout.columns = 2;
+        layout.rows = static_cast<uint8_t>((item_count + 1) / 2);
+    }
+    layout.items_per_page = static_cast<uint8_t>(layout.columns * layout.rows);
+    return layout;
+}
+
 static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_LEN], const char icons[][MAX_ICON_NAME_LEN], uint8_t item_count,
-                              uint8_t list_page, uint16_t grid_start_y) {
+                              uint8_t list_page, uint16_t grid_start_y, bool expand_single_page_layout = false) {
     const uint8_t total_pages = list_page_count(item_count);
     const uint8_t page = std::min(list_page, static_cast<uint8_t>(total_pages - 1));
-    const uint8_t first_idx = page * ROOM_LIST_ROOMS_PER_PAGE;
-    const uint8_t last_idx = std::min<uint8_t>(item_count, first_idx + ROOM_LIST_ROOMS_PER_PAGE);
+    const ListGridLayout layout = list_grid_layout(item_count, total_pages, expand_single_page_layout);
+    const uint8_t first_idx = static_cast<uint8_t>(page * layout.items_per_page);
+    const uint8_t last_idx = std::min<uint8_t>(item_count, static_cast<uint8_t>(first_idx + layout.items_per_page));
 
     const int16_t grid_w = DISPLAY_WIDTH - 2 * ROOM_LIST_GRID_MARGIN_X;
     const int16_t grid_h = ROOM_LIST_GRID_BOTTOM_Y - grid_start_y;
-    const int16_t tile_w = (grid_w - (ROOM_LIST_COLUMNS - 1) * ROOM_LIST_GRID_GAP_X) / ROOM_LIST_COLUMNS;
-    const int16_t tile_h = (grid_h - (ROOM_LIST_ROWS - 1) * ROOM_LIST_GRID_GAP_Y) / ROOM_LIST_ROWS;
+    const int16_t tile_w = (grid_w - (layout.columns - 1) * ROOM_LIST_GRID_GAP_X) / layout.columns;
+    const int16_t tile_h = (grid_h - (layout.rows - 1) * ROOM_LIST_GRID_GAP_Y) / layout.rows;
 
     for (uint8_t idx = first_idx; idx < last_idx; idx++) {
         const uint8_t slot = idx - first_idx;
-        const uint8_t row = slot / ROOM_LIST_COLUMNS;
-        const uint8_t col = slot % ROOM_LIST_COLUMNS;
+        const uint8_t row = slot / layout.columns;
+        const uint8_t col = slot % layout.columns;
         const int16_t tile_x = ROOM_LIST_GRID_MARGIN_X + col * (tile_w + ROOM_LIST_GRID_GAP_X);
         const int16_t tile_y = grid_start_y + row * (tile_h + ROOM_LIST_GRID_GAP_Y);
 
@@ -436,8 +471,7 @@ static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_
 
         epaper->fillRoundRect(label_x, label_y, label_width, 32, 12, 0xe);
         epaper->drawRoundRect(label_x, label_y, label_width, 32, 12, BBEP_BLACK);
-        epaper->setCursor(label_x + 12, ROOM_LIST_FOOTER_Y);
-        epaper->write(page_text);
+        draw_text_at(epaper, label_x + 12, ROOM_LIST_FOOTER_Y, page_text, true);
     }
 }
 
@@ -447,12 +481,11 @@ void ui_draw_floor_list(FASTEPD* epaper, const FloorListSnapshot* snapshot, uint
 
     if (snapshot->floor_count == 0) {
         epaper->setFont(Montserrat_Regular_26);
-        epaper->setCursor(ROOM_LIST_GRID_MARGIN_X, FLOOR_LIST_GRID_START_Y + 40);
-        epaper->write("No floors found");
+        draw_text_at(epaper, ROOM_LIST_GRID_MARGIN_X, FLOOR_LIST_GRID_START_Y + 40, "No floors found");
         return;
     }
 
-    ui_draw_name_grid(epaper, snapshot->floor_names, snapshot->floor_icons, snapshot->floor_count, floor_list_page, FLOOR_LIST_GRID_START_Y);
+    ui_draw_name_grid(epaper, snapshot->floor_names, snapshot->floor_icons, snapshot->floor_count, floor_list_page, FLOOR_LIST_GRID_START_Y, true);
 }
 
 void ui_draw_room_list_header(FASTEPD* epaper, const char* floor_name) {
@@ -464,12 +497,10 @@ void ui_draw_room_list_header(FASTEPD* epaper, const char* floor_name) {
     strncpy(floor_label, floor_name ? floor_name : "", sizeof(floor_label) - 1);
     floor_label[sizeof(floor_label) - 1] = '\0';
     truncate_with_ellipsis(epaper, floor_label, sizeof(floor_label), DISPLAY_WIDTH - (ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32) - 8);
-    epaper->setCursor(ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 30);
-    epaper->write(floor_label);
+    draw_text_at(epaper, ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 30, floor_label, true);
 
     epaper->setFont(Montserrat_Regular_16);
-    epaper->setCursor(ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 56);
-    epaper->write("Choose a room");
+    draw_text_at(epaper, ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 56, "Choose a room", true);
 
     epaper->drawLine(0, ROOM_LIST_HEADER_HEIGHT, DISPLAY_WIDTH, ROOM_LIST_HEADER_HEIGHT, BBEP_BLACK);
 }
@@ -480,26 +511,24 @@ void ui_draw_room_list(FASTEPD* epaper, const RoomListSnapshot* snapshot, uint8_
 
     if (snapshot->room_count == 0) {
         epaper->setFont(Montserrat_Regular_26);
-        epaper->setCursor(ROOM_LIST_GRID_MARGIN_X, ROOM_LIST_GRID_START_Y + 40);
-        epaper->write("No rooms found");
+        draw_text_at(epaper, ROOM_LIST_GRID_MARGIN_X, ROOM_LIST_GRID_START_Y + 40, "No rooms found");
         return;
     }
 
-    ui_draw_name_grid(epaper, snapshot->room_names, snapshot->room_icons, snapshot->room_count, room_list_page, ROOM_LIST_GRID_START_Y);
+    ui_draw_name_grid(epaper, snapshot->room_names, snapshot->room_icons, snapshot->room_count, room_list_page, ROOM_LIST_GRID_START_Y, false);
 }
 
-static uint16_t ui_room_controls_light_height_for_counts(uint8_t climate_count, uint8_t light_count) {
+static uint16_t ui_room_controls_light_height_for_counts(uint8_t full_row_count, uint32_t full_row_height_total, uint8_t light_count) {
     const uint8_t light_rows = static_cast<uint8_t>((light_count + 1) / 2);
     if (light_rows == 0) {
         return ROOM_CONTROLS_LIGHT_HEIGHT;
     }
 
-    const uint8_t total_rows = static_cast<uint8_t>(climate_count + light_rows);
+    const uint8_t total_rows = static_cast<uint8_t>(full_row_count + light_rows);
     const int32_t display_bottom = static_cast<int32_t>(DISPLAY_HEIGHT) - ROOM_CONTROLS_BOTTOM_PADDING;
     const int32_t available_height = display_bottom - ROOM_CONTROLS_ITEM_START_Y;
     const int32_t total_gap_height = total_rows > 1 ? static_cast<int32_t>(total_rows - 1) * ROOM_CONTROLS_ITEM_GAP : 0;
-    const int32_t climate_height_total = static_cast<int32_t>(climate_count) * ROOM_CONTROLS_CLIMATE_HEIGHT;
-    const int32_t available_light_height = available_height - total_gap_height - climate_height_total;
+    const int32_t available_light_height = available_height - total_gap_height - static_cast<int32_t>(full_row_height_total);
 
     int32_t candidate = ROOM_CONTROLS_LIGHT_MIN_HEIGHT;
     if (available_light_height > 0) {
@@ -544,17 +573,21 @@ bool ui_build_room_controls(Screen* screen,
     };
 
     auto place_entity = [&](uint8_t idx) {
-        const bool is_climate = snapshot->entity_types[idx] == CommandType::SetClimateModeAndTemperature;
+        const CommandType entity_type = snapshot->entity_types[idx];
+        const bool is_cover = entity_type == CommandType::SetCoverOpenClose;
+        const bool is_climate = entity_type == CommandType::SetClimateModeAndTemperature;
+        const bool is_light = !is_climate && !is_cover;
+        const uint16_t full_row_height = is_climate ? ROOM_CONTROLS_CLIMATE_HEIGHT : ROOM_CONTROLS_COVER_HEIGHT;
         while (true) {
-            if (is_climate) {
+            if (!is_light) {
                 uint16_t row_y = pos_y;
                 if (light_col != 0) {
                     row_y = static_cast<uint16_t>(row_y + packing_light_height + ROOM_CONTROLS_ITEM_GAP);
                 }
 
-                if (row_y + ROOM_CONTROLS_CLIMATE_HEIGHT <= display_bottom) {
+                if (row_y + full_row_height <= display_bottom) {
                     entity_pages[idx] = current_page;
-                    pos_y = static_cast<uint16_t>(row_y + ROOM_CONTROLS_CLIMATE_HEIGHT + ROOM_CONTROLS_ITEM_GAP);
+                    pos_y = static_cast<uint16_t>(row_y + full_row_height + ROOM_CONTROLS_ITEM_GAP);
                     light_col = 0;
                     return;
                 }
@@ -601,19 +634,25 @@ bool ui_build_room_controls(Screen* screen,
         target_page = static_cast<uint8_t>(*page_count - 1);
     }
 
-    uint8_t target_climate_count = 0;
+    uint8_t target_full_row_count = 0;
+    uint32_t target_full_row_height_total = 0;
     uint8_t target_light_count = 0;
     for (uint8_t idx = 0; idx < snapshot->entity_count; idx++) {
         if (entity_pages[idx] != target_page) {
             continue;
         }
-        if (snapshot->entity_types[idx] == CommandType::SetClimateModeAndTemperature) {
-            target_climate_count++;
+        const CommandType entity_type = snapshot->entity_types[idx];
+        if (entity_type == CommandType::SetClimateModeAndTemperature) {
+            target_full_row_count++;
+            target_full_row_height_total += ROOM_CONTROLS_CLIMATE_HEIGHT;
+        } else if (entity_type == CommandType::SetCoverOpenClose) {
+            target_full_row_count++;
+            target_full_row_height_total += ROOM_CONTROLS_COVER_HEIGHT;
         } else {
             target_light_count++;
         }
     }
-    const uint16_t light_height = ui_room_controls_light_height_for_counts(target_climate_count, target_light_count);
+    const uint16_t light_height = ui_room_controls_light_height_for_counts(target_full_row_count, target_full_row_height_total, target_light_count);
 
     uint16_t draw_y = ROOM_CONTROLS_ITEM_START_Y;
     uint8_t draw_light_col = 0;
@@ -622,29 +661,46 @@ bool ui_build_room_controls(Screen* screen,
             continue;
         }
 
-        const bool is_climate = snapshot->entity_types[idx] == CommandType::SetClimateModeAndTemperature;
-        if (is_climate) {
+        const CommandType entity_type = snapshot->entity_types[idx];
+        const bool is_cover = entity_type == CommandType::SetCoverOpenClose;
+        const bool is_climate = entity_type == CommandType::SetClimateModeAndTemperature;
+        const bool is_light = !is_climate && !is_cover;
+        if (!is_light) {
             if (draw_light_col != 0) {
                 draw_y = static_cast<uint16_t>(draw_y + light_height + ROOM_CONTROLS_ITEM_GAP);
                 draw_light_col = 0;
             }
-            if (draw_y + ROOM_CONTROLS_CLIMATE_HEIGHT > display_bottom) {
+            const uint16_t full_row_height = is_climate ? ROOM_CONTROLS_CLIMATE_HEIGHT : ROOM_CONTROLS_COVER_HEIGHT;
+            if (draw_y + full_row_height > display_bottom) {
                 *geometry_truncated = true;
                 break;
             }
 
-            screen_add_climate(
-                ClimateConfig{
-                    .entity_ref = EntityRef{.index = snapshot->entity_ids[idx]},
-                    .label = snapshot->entity_names[idx],
-                    .climate_mode_mask = snapshot->entity_climate_mode_masks[idx],
-                    .pos_x = ROOM_CONTROLS_ITEM_X,
-                    .pos_y = draw_y,
-                    .width = full_width,
-                    .height = ROOM_CONTROLS_CLIMATE_HEIGHT,
-                },
-                screen);
-            draw_y = static_cast<uint16_t>(draw_y + ROOM_CONTROLS_CLIMATE_HEIGHT + ROOM_CONTROLS_ITEM_GAP);
+            if (is_climate) {
+                screen_add_climate(
+                    ClimateConfig{
+                        .entity_ref = EntityRef{.index = snapshot->entity_ids[idx]},
+                        .label = snapshot->entity_names[idx],
+                        .climate_mode_mask = snapshot->entity_climate_mode_masks[idx],
+                        .pos_x = ROOM_CONTROLS_ITEM_X,
+                        .pos_y = draw_y,
+                        .width = full_width,
+                        .height = ROOM_CONTROLS_CLIMATE_HEIGHT,
+                    },
+                    screen);
+            } else {
+                screen_add_cover(
+                    CoverConfig{
+                        .entity_ref = EntityRef{.index = snapshot->entity_ids[idx]},
+                        .label = snapshot->entity_names[idx],
+                        .pos_x = ROOM_CONTROLS_ITEM_X,
+                        .pos_y = draw_y,
+                        .width = full_width,
+                        .height = ROOM_CONTROLS_COVER_HEIGHT,
+                    },
+                    screen);
+            }
+            draw_y = static_cast<uint16_t>(draw_y + full_row_height + ROOM_CONTROLS_ITEM_GAP);
         } else {
             if (draw_y + light_height > display_bottom) {
                 *geometry_truncated = true;
@@ -680,19 +736,17 @@ void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, uint8_
     epaper->setFont(Montserrat_Regular_20);
     epaper->setTextColor(BBEP_BLACK);
 
-    epaper->fillRect(0, 0, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, BBEP_WHITE);
+    epaper->fillRect(0, 0, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, 0xe);
     ui_draw_back_button(epaper);
 
     char room_label[MAX_ROOM_NAME_LEN];
     strncpy(room_label, room_name ? room_name : "", sizeof(room_label) - 1);
     room_label[sizeof(room_label) - 1] = '\0';
     truncate_with_ellipsis(epaper, room_label, sizeof(room_label), DISPLAY_WIDTH - (ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32) - 8);
-    epaper->setCursor(ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 30);
-    epaper->write(room_label);
+    draw_text_at(epaper, ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 30, room_label, true);
 
     epaper->setFont(Montserrat_Regular_16);
-    epaper->setCursor(ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 56);
-    epaper->write("Controls");
+    draw_text_at(epaper, ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 56, "Controls", true);
 
     if (room_controls_page_count > 1) {
         char page_text[20];
@@ -705,16 +759,14 @@ void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, uint8_
 
         epaper->fillRoundRect(badge_x, badge_y, badge_w, 26, 10, 0xe);
         epaper->drawRoundRect(badge_x, badge_y, badge_w, 26, 10, BBEP_BLACK);
-        epaper->setCursor(badge_x + 10, badge_y + 18);
-        epaper->write(page_text);
+        draw_text_at(epaper, badge_x + 10, badge_y + 18, page_text, true);
     }
 
     epaper->drawLine(0, ROOM_CONTROLS_HEADER_HEIGHT, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, BBEP_BLACK);
 
     if (truncated) {
         epaper->setFont(Montserrat_Regular_16);
-        epaper->setCursor(ROOM_CONTROLS_ITEM_X, DISPLAY_HEIGHT - 20);
-        epaper->write("Some controls could not be displayed");
+        draw_text_at(epaper, ROOM_CONTROLS_ITEM_X, DISPLAY_HEIGHT - 20, "Some controls could not be displayed", true);
     }
 }
 

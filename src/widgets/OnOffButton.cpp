@@ -31,6 +31,15 @@ static BB_RECT get_text_box(FASTEPD* display, const char* text) {
     return rect;
 }
 
+static void draw_text_at(FASTEPD* display, int16_t x, int16_t y, const char* text, bool reinforce = false) {
+    display->setCursor(x, y);
+    display->write(text);
+    if (reinforce) {
+        display->setCursor(x + 1, y);
+        display->write(text);
+    }
+}
+
 static void copy_text(char* dst, size_t dst_len, const char* src) {
     if (dst_len == 0) {
         return;
@@ -227,8 +236,7 @@ void OnOffButton::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
     BB_RECT text_rect = get_text_box(display, draw_label);
     int16_t text_x = static_cast<int16_t>(label_rect_.x) + static_cast<int16_t>(label_rect_.w - text_rect.w) / 2;
     int16_t text_y = static_cast<int16_t>(label_rect_.y) + static_cast<int16_t>(label_rect_.h + text_rect.h) / 2 - 2;
-    display->setCursor(text_x, text_y);
-    display->write(draw_label);
+    draw_text_at(display, text_x, text_y, draw_label, font_idx != 0);
 }
 
 bool OnOffButton::isTouching(const TouchEvent* touch_event) const {

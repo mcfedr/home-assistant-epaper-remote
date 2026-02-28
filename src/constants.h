@@ -67,6 +67,7 @@ constexpr uint16_t ROOM_CONTROLS_ITEM_START_Y = 130;
 constexpr uint16_t ROOM_CONTROLS_LIGHT_HEIGHT = (BUTTON_SIZE + 50) * 13 / 10;      // +30%
 constexpr uint16_t ROOM_CONTROLS_LIGHT_MIN_HEIGHT = 96;                              // Keep enough room for icon + label
 constexpr uint16_t ROOM_CONTROLS_CLIMATE_HEIGHT = (BUTTON_SIZE * 2 + 40) * 13 / 10; // +30%
+constexpr uint16_t ROOM_CONTROLS_COVER_HEIGHT = (BUTTON_SIZE + 40) * 13 / 10;       // +30%
 constexpr uint16_t ROOM_CONTROLS_ITEM_GAP = 20;
 constexpr uint16_t ROOM_CONTROLS_LIGHT_COLUMN_GAP = 20;
 constexpr uint16_t ROOM_CONTROLS_ITEM_X = 30;

@@ -11,6 +11,7 @@
 #include "managers/home_assistant.h"
 #include "store.h"
 #include <cJSON.h>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 
@@ -95,6 +96,78 @@ static const char* get_optional_string(cJSON* object, const char* key, const cha
         return nullptr;
     }
     return item->valuestring;
+}
+
+static const char* hass_entity_display_name_from_registry(cJSON* item) {
+    cJSON* name_item = cJSON_GetObjectItem(item, "name");
+    cJSON* original_name_item = cJSON_GetObjectItem(item, "original_name");
+    cJSON* compact_name_item = cJSON_GetObjectItem(item, "en");
+    if (cJSON_IsString(name_item) && name_item->valuestring[0] != '\0') {
+        return name_item->valuestring;
+    }
+    if (cJSON_IsString(original_name_item) && original_name_item->valuestring[0] != '\0') {
+        return original_name_item->valuestring;
+    }
+    if (cJSON_IsString(compact_name_item) && compact_name_item->valuestring[0] != '\0') {
+        return compact_name_item->valuestring;
+    }
+    return nullptr;
+}
+
+static bool contains_case_insensitive(const char* haystack, const char* needle) {
+    if (!haystack || !needle || needle[0] == '\0') {
+        return false;
+    }
+
+    const size_t needle_len = strlen(needle);
+    const size_t haystack_len = strlen(haystack);
+    if (needle_len > haystack_len) {
+        return false;
+    }
+
+    for (size_t i = 0; i + needle_len <= haystack_len; i++) {
+        bool match = true;
+        for (size_t j = 0; j < needle_len; j++) {
+            const char a = static_cast<char>(tolower(static_cast<unsigned char>(haystack[i + j])));
+            const char b = static_cast<char>(tolower(static_cast<unsigned char>(needle[j])));
+            if (a != b) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool cover_is_group_like_name(const char* text) {
+    if (!text) {
+        return false;
+    }
+    return contains_case_insensitive(text, "group") || contains_case_insensitive(text, "_group") ||
+           contains_case_insensitive(text, "all_") || contains_case_insensitive(text, "_all") ||
+           contains_case_insensitive(text, " all ") || contains_case_insensitive(text, "covers") ||
+           contains_case_insensitive(text, "shutters");
+}
+
+static bool cover_is_projector_exception(const char* entity_id, const char* display_name) {
+    return contains_case_insensitive(entity_id, "projector") || contains_case_insensitive(display_name, "projector");
+}
+
+static bool cover_entity_should_be_included(cJSON* item, const char* entity_id, const char* display_name) {
+    if (cover_is_projector_exception(entity_id, display_name)) {
+        return true;
+    }
+
+    const char* platform = get_optional_string(item, "platform", "pl");
+    const char* integration = get_optional_string(item, "integration", "it");
+    if ((platform && strcmp(platform, "group") == 0) || (integration && strcmp(integration, "group") == 0)) {
+        return true;
+    }
+
+    return cover_is_group_like_name(entity_id) || cover_is_group_like_name(display_name);
 }
 
 static void hass_reset_discovery_state(home_assistant_context_t* hass) {
@@ -471,6 +544,17 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
         entity_mode = static_cast<uint8_t>(mode);
         entity_value = static_cast<int8_t>(temp_steps);
         value = climate_pack_value(mode, temp_steps);
+    } else if (command_type == CommandType::SetCoverOpenClose) {
+        bool is_open = entity_mode != 0;
+        if (cJSON_IsString(state)) {
+            if (strcmp(state->valuestring, "open") == 0 || strcmp(state->valuestring, "opening") == 0) {
+                is_open = true;
+            } else if (strcmp(state->valuestring, "closed") == 0 || strcmp(state->valuestring, "closing") == 0) {
+                is_open = false;
+            }
+        }
+        entity_mode = is_open ? 1 : 0;
+        value = is_open ? 1 : 0;
     } else {
         bool is_on = entity_mode != 0;
 
@@ -721,11 +805,19 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
             continue;
         }
 
+        const char* display_name = hass_entity_display_name_from_registry(item);
+
         CommandType command_type;
         if (strncmp(entity_id_item->valuestring, "light.", 6) == 0) {
             command_type = CommandType::SetLightBrightnessPercentage;
         } else if (strncmp(entity_id_item->valuestring, "climate.", 8) == 0) {
             command_type = CommandType::SetClimateModeAndTemperature;
+        } else if (strncmp(entity_id_item->valuestring, "cover.", 6) == 0) {
+            if (!cover_entity_should_be_included(item, entity_id_item->valuestring, display_name)) {
+                ESP_LOGI(TAG, "Skipping non-group cover %s", entity_id_item->valuestring);
+                continue;
+            }
+            command_type = CommandType::SetCoverOpenClose;
         } else {
             continue;
         }
@@ -741,18 +833,6 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
             continue;
         }
 
-        const char* display_name = nullptr;
-        cJSON* name_item = cJSON_GetObjectItem(item, "name");
-        cJSON* original_name_item = cJSON_GetObjectItem(item, "original_name");
-        cJSON* compact_name_item = cJSON_GetObjectItem(item, "en");
-        if (cJSON_IsString(name_item) && name_item->valuestring[0] != '\0') {
-            display_name = name_item->valuestring;
-        } else if (cJSON_IsString(original_name_item) && original_name_item->valuestring[0] != '\0') {
-            display_name = original_name_item->valuestring;
-        } else if (cJSON_IsString(compact_name_item) && compact_name_item->valuestring[0] != '\0') {
-            display_name = compact_name_item->valuestring;
-        }
-
         EntityConfig entity = {
             .entity_id = entity_id_item->valuestring,
             .command_type = command_type,
@@ -764,7 +844,7 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
 }
 
 void hass_start_discovery(home_assistant_context_t* hass) {
-    ESP_LOGI(TAG, "Starting room/light discovery");
+    ESP_LOGI(TAG, "Starting room entity discovery");
     hass_reset_discovery_state(hass);
     store_begin_room_sync(hass->store);
     hass_set_pending_discovery_command(hass, DiscoveryCommandRequestFloorRegistry);
@@ -841,7 +921,7 @@ void hass_handle_result(home_assistant_context_t* hass, cJSON* json) {
         if (entity_count > 0) {
             hass_set_pending_discovery_command(hass, DiscoveryCommandSubscribeEntities);
         } else {
-            ESP_LOGW(TAG, "No light/climate entities discovered for mapped rooms");
+            ESP_LOGW(TAG, "No light/climate/cover entities discovered for mapped rooms");
             hass_update_state(hass, ConnState::Up);
         }
         return;
@@ -1002,6 +1082,12 @@ void hass_send_command(home_assistant_context_t* hass, Command* cmd) {
             cJSON_AddNumberToObject(temp_service_data, "temperature", target_c);
             hass_send_call_service(hass, "climate", "set_temperature", temp_service_data);
         }
+        break;
+    }
+    case CommandType::SetCoverOpenClose: {
+        cJSON* service_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
+        hass_send_call_service(hass, "cover", cmd->value == 0 ? "close_cover" : "open_cover", service_data);
         break;
     }
     case CommandType::SetFanSpeedPercentage: {

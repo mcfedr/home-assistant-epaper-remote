@@ -2,6 +2,7 @@
 #include "assets/Montserrat_Regular_16.h"
 #include "assets/Montserrat_Regular_20.h"
 #include "assets/Montserrat_Regular_26.h"
+#include "assets/icons.h"
 #include "climate_value.h"
 #include "constants.h"
 #include <FastEPD.h>
@@ -18,6 +19,15 @@ static BB_RECT get_text_box(FASTEPD* display, const char* text) {
     BB_RECT rect = {};
     display->getStringBox(text, &rect);
     return rect;
+}
+
+static void draw_text_at(FASTEPD* display, int16_t x, int16_t y, const char* text, bool reinforce = false) {
+    display->setCursor(x, y);
+    display->write(text);
+    if (reinforce) {
+        display->setCursor(x + 1, y);
+        display->write(text);
+    }
 }
 
 static Rect make_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
@@ -81,37 +91,40 @@ static void truncate_with_ellipsis(FASTEPD* display, char* text, size_t text_len
     text[text_len - 1] = '\0';
 }
 
-static void draw_centered_text(FASTEPD* display, const char* text, const Rect* rect, int16_t y_offset = 0) {
+static void draw_centered_text(FASTEPD* display, const char* text, const Rect* rect, int16_t y_offset = 0, bool reinforce = false) {
     BB_RECT text_box = get_text_box(display, text);
     const int16_t x = static_cast<int16_t>(rect->x) + static_cast<int16_t>(rect->w - text_box.w) / 2;
     const int16_t y = static_cast<int16_t>(rect->y) + static_cast<int16_t>(rect->h + text_box.h) / 2 - 2 + y_offset;
-    display->setCursor(x, y);
-    display->write(text);
+    draw_text_at(display, x, y, text, reinforce);
 }
 
-static const char* climate_mode_label(ClimateMode mode) {
+static const uint8_t* get_mode_icon(ClimateMode mode) {
     switch (mode) {
-    case ClimateMode::Off:
-        return "OFF";
     case ClimateMode::Heat:
-        return "HEAT";
+        return climate_mode_heat;
     case ClimateMode::Cool:
-        return "COOL";
+        return climate_mode_cool;
+    case ClimateMode::Off:
     default:
-        return "OFF";
+        return climate_mode_off;
     }
 }
 
-static void draw_mode_button(FASTEPD* display, const Rect* rect, const char* label, bool active, uint8_t white) {
+static void draw_mode_button(FASTEPD* display, const Rect* rect, ClimateMode mode, bool active, uint8_t white) {
     const uint8_t fill = active ? BBEP_BLACK : white;
     const int16_t radius = std::max<int16_t>(6, std::min<int16_t>(12, static_cast<int16_t>(rect->h / 3)));
     display->fillRoundRect(rect->x, rect->y, rect->w, rect->h, radius, fill);
     display->drawRoundRect(rect->x, rect->y, rect->w, rect->h, radius, BBEP_BLACK);
 
-    display->setTextColor(active ? white : BBEP_BLACK);
-    display->setFont(Montserrat_Regular_16);
-    draw_centered_text(display, label, rect);
-    display->setTextColor(BBEP_BLACK);
+    const uint8_t* icon = get_mode_icon(mode);
+    if (!icon) {
+        return;
+    }
+
+    const int16_t icon_x = static_cast<int16_t>(rect->x) + std::max<int16_t>(0, (static_cast<int16_t>(rect->w) - BUTTON_ICON_SIZE) / 2);
+    const int16_t icon_y = static_cast<int16_t>(rect->y) + std::max<int16_t>(0, (static_cast<int16_t>(rect->h) - BUTTON_ICON_SIZE) / 2);
+    const uint8_t fg = active ? white : BBEP_BLACK;
+    display->loadBMP(icon, icon_x, icon_y, fill, fg);
 }
 
 ClimateWidget::ClimateWidget(const char* label, Rect rect, uint8_t climate_mode_mask)
@@ -211,7 +224,7 @@ void ClimateWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
 
     display->setFont(Montserrat_Regular_20);
     truncate_with_ellipsis(display, draw_label, sizeof(draw_label), static_cast<int16_t>(label_rect_.w));
-    draw_centered_text(display, draw_label, &label_rect_);
+    draw_centered_text(display, draw_label, &label_rect_, 0, true);
 
     ClimateMode mode = climate_unpack_mode(value);
     bool mode_visible = false;
@@ -229,7 +242,7 @@ void ClimateWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
 
     for (uint8_t i = 0; i < mode_button_count_; i++) {
         ClimateMode button_mode = mode_buttons_[i];
-        draw_mode_button(display, &mode_rects_[i], climate_mode_label(button_mode), button_mode == mode, white);
+        draw_mode_button(display, &mode_rects_[i], button_mode, button_mode == mode, white);
     }
 
     display->fillRoundRect(minus_rect_.x, minus_rect_.y, minus_rect_.w, minus_rect_.h, 12, white);
@@ -246,7 +259,7 @@ void ClimateWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
     char temp_text[16];
     snprintf(temp_text, sizeof(temp_text), "%.1fC", temp_c);
     display->setFont(Montserrat_Regular_20);
-    draw_centered_text(display, temp_text, &temp_adjust_value_rect_);
+    draw_centered_text(display, temp_text, &temp_adjust_value_rect_, 0, true);
 }
 
 bool ClimateWidget::isTouching(const TouchEvent* touch_event) const {

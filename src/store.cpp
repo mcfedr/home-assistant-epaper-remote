@@ -189,15 +189,19 @@ static uint8_t room_controls_page_count_locked(const EntityStore* store, int8_t 
         light_col = 0;
     };
 
-    auto place_entity = [&](bool is_climate) {
+    auto place_entity = [&](CommandType command_type) {
+        const bool is_cover = command_type == CommandType::SetCoverOpenClose;
+        const bool is_climate = command_type == CommandType::SetClimateModeAndTemperature;
+        const bool is_light = !is_climate && !is_cover;
+        const uint16_t full_height = is_climate ? ROOM_CONTROLS_CLIMATE_HEIGHT : ROOM_CONTROLS_COVER_HEIGHT;
         while (true) {
-            if (is_climate) {
+            if (!is_light) {
                 uint16_t row_y = pos_y;
                 if (light_col != 0) {
                     row_y = static_cast<uint16_t>(row_y + light_height + ROOM_CONTROLS_ITEM_GAP);
                 }
-                if (row_y + ROOM_CONTROLS_CLIMATE_HEIGHT <= display_bottom) {
-                    pos_y = static_cast<uint16_t>(row_y + ROOM_CONTROLS_CLIMATE_HEIGHT + ROOM_CONTROLS_ITEM_GAP);
+                if (row_y + full_height <= display_bottom) {
+                    pos_y = static_cast<uint16_t>(row_y + full_height + ROOM_CONTROLS_ITEM_GAP);
                     light_col = 0;
                     return;
                 }
@@ -225,18 +229,20 @@ static uint8_t room_controls_page_count_locked(const EntityStore* store, int8_t 
         }
     };
 
-    for (uint8_t pass = 0; pass < 2 && !impossible; pass++) {
-        const bool climate_pass = pass == 0;
+    for (uint8_t pass = 0; pass < 3 && !impossible; pass++) {
         for (uint8_t i = 0; i < room.entity_count && !impossible; i++) {
             uint8_t entity_idx = room.entity_ids[i];
             if (!entity_visible_in_room_controls_locked(store, entity_idx)) {
                 continue;
             }
-            const bool is_climate = store->entities[entity_idx].command_type == CommandType::SetClimateModeAndTemperature;
-            if (is_climate != climate_pass) {
+            CommandType command_type = store->entities[entity_idx].command_type;
+            const uint8_t group = command_type == CommandType::SetClimateModeAndTemperature
+                                      ? 0
+                                      : (command_type == CommandType::SetCoverOpenClose ? 1 : 2);
+            if (group != pass) {
                 continue;
             }
-            place_entity(is_climate);
+            place_entity(command_type);
         }
     }
 
@@ -738,7 +744,7 @@ bool store_get_room_controls_snapshot(EntityStore* store, int8_t room_idx, RoomC
         snapshot_idx++;
     };
 
-    // Always place climate widgets first in the room controls list.
+    // Always place climate widgets first, then covers, then lights.
     for (uint8_t i = 0; i < room.entity_count && snapshot_idx < snapshot->entity_count; i++) {
         uint8_t entity_idx = room.entity_ids[i];
         if (!entity_visible_in_room_controls_locked(store, entity_idx)) {
@@ -753,7 +759,17 @@ bool store_get_room_controls_snapshot(EntityStore* store, int8_t room_idx, RoomC
         if (!entity_visible_in_room_controls_locked(store, entity_idx)) {
             continue;
         }
-        if (store->entities[entity_idx].command_type != CommandType::SetClimateModeAndTemperature) {
+        if (store->entities[entity_idx].command_type == CommandType::SetCoverOpenClose) {
+            append_entity_to_snapshot(entity_idx);
+        }
+    }
+    for (uint8_t i = 0; i < room.entity_count && snapshot_idx < snapshot->entity_count; i++) {
+        uint8_t entity_idx = room.entity_ids[i];
+        if (!entity_visible_in_room_controls_locked(store, entity_idx)) {
+            continue;
+        }
+        if (store->entities[entity_idx].command_type != CommandType::SetClimateModeAndTemperature &&
+            store->entities[entity_idx].command_type != CommandType::SetCoverOpenClose) {
             append_entity_to_snapshot(entity_idx);
         }
     }
