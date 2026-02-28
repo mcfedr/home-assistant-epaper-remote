@@ -45,6 +45,7 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
   - Floor list -> Room list -> Room controls
   - Back button from room controls returns to room list
   - Back button from room list returns to floor list
+  - Hardware home button returns to floor list (root home) from any UI state
 
 ### 4.3 Floor and Room List Screens
 
@@ -110,6 +111,14 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
 - Swipes must not accidentally trigger control toggles.
 - Swipe threshold must be high enough to distinguish intentional page navigation from taps.
 
+### 4.10 Hardware Home Button
+
+- Lilygo T5 E-Paper S3 Pro front home button must be supported.
+- On Lilygo hardware, home button detection must use the touch controller key channel (GT911/CST226) rather than a dedicated GPIO button input.
+- GT911 configuration must be compatible with key event detection (LOW_LEVEL_QUERY mode).
+- A home button press must call the same navigation action as `go home` in the store (reset selected floor/room and list pages).
+- Hardware without this front button may omit the feature, but must still compile and run without errors.
+
 ### 4.9 State Synchronization
 
 - Device must subscribe to Home Assistant updates and refresh widget states.
@@ -155,4 +164,5 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
 - Climate controls support mode switching and +/-0.5 degree temperature changes.
 - Light controls remain fully visible (no overflow), tappable, and responsive.
 - Back navigation works consistently between all navigation levels.
+- Front home button returns to the floor list root from room list or room controls.
 - UI reflects external Home Assistant state changes after initial load.

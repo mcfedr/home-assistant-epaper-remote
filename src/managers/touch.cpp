@@ -1,8 +1,148 @@
 #include "managers/touch.h"
 #include "boards.h"
 #include "constants.h"
+#include <Wire.h>
 
 static const char* TAG = "touch";
+
+static bool i2c_read_reg8(uint8_t addr, uint8_t reg, uint8_t* buf, size_t len) {
+    Wire.beginTransmission(addr);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) {
+        return false;
+    }
+
+    if (Wire.requestFrom(static_cast<int>(addr), static_cast<int>(len)) != static_cast<int>(len)) {
+        return false;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        buf[i] = Wire.read();
+    }
+    return true;
+}
+
+static bool i2c_device_present(uint8_t addr) {
+    Wire.beginTransmission(addr);
+    return Wire.endTransmission() == 0;
+}
+
+static bool i2c_read_reg16(uint8_t addr, uint16_t reg, uint8_t* buf, size_t len) {
+    Wire.beginTransmission(addr);
+    Wire.write(static_cast<uint8_t>(reg >> 8));
+    Wire.write(static_cast<uint8_t>(reg & 0xFF));
+    if (Wire.endTransmission(false) != 0) {
+        return false;
+    }
+
+    if (Wire.requestFrom(static_cast<int>(addr), static_cast<int>(len)) != static_cast<int>(len)) {
+        return false;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        buf[i] = Wire.read();
+    }
+    return true;
+}
+
+static bool i2c_write_reg16(uint8_t addr, uint16_t reg, uint8_t value) {
+    Wire.beginTransmission(addr);
+    Wire.write(static_cast<uint8_t>(reg >> 8));
+    Wire.write(static_cast<uint8_t>(reg & 0xFF));
+    Wire.write(value);
+    return Wire.endTransmission() == 0;
+}
+
+static bool i2c_read_reg16_block(uint8_t addr, uint16_t reg, uint8_t* buf, size_t len) {
+    size_t offset = 0;
+    while (offset < len) {
+        size_t chunk = len - offset;
+        if (chunk > 16) {
+            chunk = 16;
+        }
+        if (!i2c_read_reg16(addr, reg + offset, buf + offset, chunk)) {
+            return false;
+        }
+        offset += chunk;
+    }
+    return true;
+}
+
+static bool detect_gt911_address(uint8_t* out_addr) {
+    if (i2c_device_present(GT911_ADDR1)) {
+        *out_addr = GT911_ADDR1;
+        return true;
+    }
+    if (i2c_device_present(GT911_ADDR2)) {
+        *out_addr = GT911_ADDR2;
+        return true;
+    }
+    return false;
+}
+
+static bool configure_gt911_low_level_query(uint8_t addr) {
+    constexpr uint16_t GT911_CFG_START_REG = 0x8047;
+    constexpr uint16_t GT911_MODULE_SWITCH_1_REG = 0x804D;
+    constexpr uint16_t GT911_CFG_CHECKSUM_REG = 0x80FF;
+    constexpr uint16_t GT911_CFG_FRESH_REG = 0x8100;
+
+    uint8_t module_switch = 0;
+    if (!i2c_read_reg16(addr, GT911_MODULE_SWITCH_1_REG, &module_switch, 1)) {
+        return false;
+    }
+    const uint8_t desired_mode = static_cast<uint8_t>((module_switch & 0xFC) | 0x02); // LOW_LEVEL_QUERY
+
+    if (!i2c_write_reg16(addr, GT911_MODULE_SWITCH_1_REG, desired_mode)) {
+        return false;
+    }
+
+    uint8_t config[184] = {0};
+    if (!i2c_read_reg16_block(addr, GT911_CFG_START_REG, config, sizeof(config))) {
+        return false;
+    }
+    config[GT911_MODULE_SWITCH_1_REG - GT911_CFG_START_REG] = desired_mode;
+
+    uint8_t checksum = 0;
+    for (size_t i = 0; i < sizeof(config); i++) {
+        checksum = static_cast<uint8_t>(checksum + config[i]);
+    }
+    checksum = static_cast<uint8_t>(~checksum + 1);
+
+    if (!i2c_write_reg16(addr, GT911_CFG_CHECKSUM_REG, checksum)) {
+        return false;
+    }
+    if (!i2c_write_reg16(addr, GT911_CFG_FRESH_REG, 0x01)) {
+        return false;
+    }
+    return true;
+}
+
+static bool gt911_home_button_pressed_edge(uint8_t gt911_addr) {
+    static bool was_pressed = false;
+    uint8_t status = 0;
+    if (!i2c_read_reg16(gt911_addr, GT911_POINT_INFO, &status, 1)) {
+        return false;
+    }
+
+    const bool pressed = (status & 0x10) != 0;
+
+    const bool is_edge = pressed && !was_pressed;
+    was_pressed = pressed;
+    return is_edge;
+}
+
+static bool cst226_home_button_pressed_edge() {
+    static bool was_pressed = false;
+    uint8_t buf[28] = {0};
+    if (!i2c_read_reg8(CST226_ADDR, 0x00, buf, sizeof(buf))) {
+        return false;
+    }
+
+    const bool pressed = buf[0] == 0x83 && buf[1] == 0x17 && buf[5] == 0x80;
+    const bool is_edge = pressed && !was_pressed;
+    was_pressed = pressed;
+    return is_edge;
+}
 
 static bool is_back_button_touched(const TouchEvent* touch_event) {
     return touch_event->x >= ROOM_CONTROLS_BACK_X && touch_event->x < ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W &&
@@ -90,8 +230,37 @@ void touch_task(void* arg) {
     ESP_LOGI(TAG, "init() rc = %d", rc);
     int type = bbct->sensorType();
     ESP_LOGI(TAG, "Sensor type = %d", type);
-
+    uint8_t gt911_addr = 0;
+    const bool gt911_addr_present = detect_gt911_address(&gt911_addr);
+    const bool cst226_addr_present = i2c_device_present(CST226_ADDR);
+    const bool poll_gt911_home = (type == CT_TYPE_GT911) || gt911_addr_present;
+    const bool poll_cst226_home = (type == CT_TYPE_CST226) || cst226_addr_present;
+    ESP_LOGI(TAG, "Touch home key polling: GT911=%d CST226=%d", poll_gt911_home ? 1 : 0, poll_cst226_home ? 1 : 0);
+    if (poll_gt911_home && gt911_addr_present) {
+        if (configure_gt911_low_level_query(gt911_addr)) {
+            ESP_LOGI(TAG, "Configured GT911 interrupt mode to LOW_LEVEL_QUERY");
+        } else {
+            ESP_LOGW(TAG, "Failed to configure GT911 interrupt mode");
+        }
+    }
     while (true) {
+        if (!touching) {
+            bool go_home = false;
+            if (poll_gt911_home && gt911_addr_present && gt911_home_button_pressed_edge(gt911_addr)) {
+                ESP_LOGI(TAG, "Home button pressed (GT911 key)");
+                go_home = true;
+            }
+            if (poll_cst226_home && cst226_home_button_pressed_edge()) {
+                ESP_LOGI(TAG, "Home button pressed (CST226 key)");
+                go_home = true;
+            }
+            if (go_home) {
+                store_go_home(store);
+                vTaskDelay(pdMS_TO_TICKS(25));
+                continue;
+            }
+        }
+
         if (bbct->getSamples(&ti)) {
             last_touch_ms = millis();
             ui_state_copy(ctx->state, &ui_state_version, ui_state);
