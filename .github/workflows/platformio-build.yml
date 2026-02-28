@@ -42,5 +42,10 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
+      - name: Generate Icons Header
+        run: |
+          pip install pillow
+          python generate-icons.py
+
       - name: Build
         run: pio run -e ${{ matrix.environment }}
