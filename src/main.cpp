@@ -37,6 +37,7 @@ void setup() {
     epaper.initPanel(DISPLAY_PANEL);
     epaper.setPanelSize(DISPLAY_HEIGHT, DISPLAY_WIDTH);
     epaper.setRotation(90);
+    epaper.setPasses(DISPLAY_PARTIAL_UPDATE_PASSES, DISPLAY_FULL_UPDATE_PASSES);
     epaper.einkPower(true); // FIXME: Disabling power makes the GT911 unavailable
 
     // Launch UI task

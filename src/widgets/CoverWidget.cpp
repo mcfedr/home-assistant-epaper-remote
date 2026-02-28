@@ -39,6 +39,21 @@ static Rect make_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
     };
 }
 
+static Rect union_rects(const Rect* a, const Rect* b) {
+    if (a->w == 0 || a->h == 0) {
+        return *b;
+    }
+    if (b->w == 0 || b->h == 0) {
+        return *a;
+    }
+
+    const int16_t left = std::min<int16_t>(a->x, b->x);
+    const int16_t top = std::min<int16_t>(a->y, b->y);
+    const int16_t right = std::max<int16_t>(a->x + a->w, b->x + b->w);
+    const int16_t bottom = std::max<int16_t>(a->y + a->h, b->y + b->h);
+    return make_rect(left, top, right - left, bottom - top);
+}
+
 static void draw_text_at(FASTEPD* display, int16_t x, int16_t y, const char* text, bool reinforce = false) {
     display->setCursor(x, y);
     display->write(text);
@@ -135,9 +150,16 @@ CoverWidget::CoverWidget(const char* label, Rect rect)
 }
 
 Rect CoverWidget::partialDraw(FASTEPD* display, BitDepth depth, uint8_t from, uint8_t to) {
-    (void)from;
-    fullDraw(display, depth, to);
-    return rect_;
+    const bool from_up_active = from != 0;
+    const bool to_up_active = to != 0;
+    if (from_up_active == to_up_active) {
+        return Rect{};
+    }
+
+    const uint8_t white = depth == BitDepth::BD_4BPP ? 0xf : BBEP_WHITE;
+    draw_cover_action_button(display, &up_rect_, true, to_up_active, white);
+    draw_cover_action_button(display, &down_rect_, false, !to_up_active, white);
+    return union_rects(&up_rect_, &down_rect_);
 }
 
 void CoverWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {

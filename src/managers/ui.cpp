@@ -822,7 +822,7 @@ void ui_task(void* arg) {
                 ctx->epaper->setMode(BB_MODE_4BPP);
                 ctx->epaper->fillScreen(0xf);
                 ui_draw_floor_list(ctx->epaper, &floor_list_snapshot, current_state.floor_list_page);
-                ctx->epaper->fullUpdate(CLEAR_SLOW, true);
+                ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 display_is_dirty = false;
             } else if (current_state.mode == UiMode::RoomList && (mode_changed || rooms_changed || floor_changed || room_list_page_changed)) {
                 if (!store_get_room_list_snapshot(ctx->store, current_state.selected_floor, &room_list_snapshot)) {
@@ -830,13 +830,13 @@ void ui_task(void* arg) {
                     ctx->epaper->setMode(BB_MODE_4BPP);
                     ctx->epaper->fillScreen(0xf);
                     ui_show_message(current_state.mode, ctx->epaper);
-                    ctx->epaper->fullUpdate(CLEAR_SLOW, true);
+                    ctx->epaper->fullUpdate(CLEAR_FAST, true);
                     display_is_dirty = false;
                 } else {
                     ctx->epaper->setMode(BB_MODE_4BPP);
                     ctx->epaper->fillScreen(0xf);
                     ui_draw_room_list(ctx->epaper, &room_list_snapshot, current_state.room_list_page);
-                    ctx->epaper->fullUpdate(CLEAR_SLOW, true);
+                    ctx->epaper->fullUpdate(CLEAR_FAST, true);
                     display_is_dirty = false;
                 }
             } else if (current_state.mode == UiMode::RoomControls &&
@@ -846,7 +846,7 @@ void ui_task(void* arg) {
                 ui_draw_room_controls_header(ctx->epaper, room_controls_snapshot.room_name, current_state.room_controls_page,
                                              room_controls_page_count, room_controls_truncated);
                 ui_room_controls_draw_widgets(&current_state, BitDepth::BD_4BPP, ctx->screen, ctx->epaper);
-                ctx->epaper->fullUpdate(CLEAR_SLOW, true);
+                ctx->epaper->fullUpdate(CLEAR_FAST, true);
 
                 ctx->epaper->setMode(BB_MODE_1BPP);
                 ctx->epaper->fillScreen(BBEP_WHITE);
@@ -880,7 +880,7 @@ void ui_task(void* arg) {
                 ctx->epaper->setMode(BB_MODE_4BPP);
                 ctx->epaper->fillScreen(0xf);
                 ui_show_message(current_state.mode, ctx->epaper);
-                ctx->epaper->fullUpdate(CLEAR_SLOW, true);
+                ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 display_is_dirty = false;
             }
 

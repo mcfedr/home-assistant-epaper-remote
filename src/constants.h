@@ -38,8 +38,10 @@ constexpr size_t MAX_ENTITY_NAME_LEN = 40;
 constexpr size_t MAX_ICON_NAME_LEN = 64;
 constexpr size_t MAX_FLOOR_NAME_LEN = 40;
 constexpr size_t MAX_ROOM_NAME_LEN = 40;
-constexpr uint32_t TOUCH_RELEASE_TIMEOUT_MS = 50;
-constexpr uint32_t DISPLAY_FULL_REDRAW_TIMEOUT_MS = 5000;
+constexpr uint32_t TOUCH_RELEASE_TIMEOUT_MS = 25;
+constexpr uint32_t DISPLAY_FULL_REDRAW_TIMEOUT_MS = 15000;
+constexpr uint8_t DISPLAY_PARTIAL_UPDATE_PASSES = 2;
+constexpr uint8_t DISPLAY_FULL_UPDATE_PASSES = 4;
 
 // Floor/room list UI geometry
 constexpr uint16_t ROOM_LIST_TITLE_Y = 40;

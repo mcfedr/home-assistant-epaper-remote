@@ -52,6 +52,21 @@ static Rect make_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
     };
 }
 
+static Rect union_rects(const Rect* a, const Rect* b) {
+    if (a->w == 0 || a->h == 0) {
+        return *b;
+    }
+    if (b->w == 0 || b->h == 0) {
+        return *a;
+    }
+
+    const int16_t left = std::min<int16_t>(a->x, b->x);
+    const int16_t top = std::min<int16_t>(a->y, b->y);
+    const int16_t right = std::max<int16_t>(a->x + a->w, b->x + b->w);
+    const int16_t bottom = std::max<int16_t>(a->y + a->h, b->y + b->h);
+    return make_rect(left, top, right - left, bottom - top);
+}
+
 static void truncate_with_ellipsis(FASTEPD* display, char* text, size_t text_len, int16_t max_w) {
     if (!text || text[0] == '\0' || max_w <= 0) {
         if (text && text_len > 0) {
@@ -125,6 +140,17 @@ static void draw_mode_button(FASTEPD* display, const Rect* rect, ClimateMode mod
     const int16_t icon_y = static_cast<int16_t>(rect->y) + std::max<int16_t>(0, (static_cast<int16_t>(rect->h) - BUTTON_ICON_SIZE) / 2);
     const uint8_t fg = active ? white : BBEP_BLACK;
     display->loadBMP(icon, icon_x, icon_y, fill, fg);
+}
+
+static void draw_temp_value(FASTEPD* display, const Rect* rect, float temp_c, uint8_t white) {
+    display->fillRoundRect(rect->x, rect->y, rect->w, rect->h, 12, white);
+    display->drawRoundRect(rect->x, rect->y, rect->w, rect->h, 12, BBEP_BLACK);
+
+    char temp_text[16];
+    snprintf(temp_text, sizeof(temp_text), "%.1fC", temp_c);
+    display->setTextColor(BBEP_BLACK);
+    display->setFont(Montserrat_Regular_20);
+    draw_centered_text(display, temp_text, rect, 0, true);
 }
 
 ClimateWidget::ClimateWidget(const char* label, Rect rect, uint8_t climate_mode_mask)
@@ -207,9 +233,40 @@ ClimateWidget::ClimateWidget(const char* label, Rect rect, uint8_t climate_mode_
 }
 
 Rect ClimateWidget::partialDraw(FASTEPD* display, BitDepth depth, uint8_t from, uint8_t to) {
-    (void)from;
-    fullDraw(display, depth, to);
-    return rect_;
+    const uint8_t white = depth == BitDepth::BD_4BPP ? 0xf : BBEP_WHITE;
+
+    auto normalize_mode = [&](ClimateMode mode) {
+        for (uint8_t i = 0; i < mode_button_count_; i++) {
+            if (mode_buttons_[i] == mode) {
+                return mode;
+            }
+        }
+        return ClimateMode::Off;
+    };
+
+    ClimateMode from_mode = normalize_mode(climate_unpack_mode(from));
+    ClimateMode to_mode = normalize_mode(climate_unpack_mode(to));
+    const uint8_t from_temp_steps = climate_unpack_temp_steps(from);
+    const uint8_t to_temp_steps = climate_unpack_temp_steps(to);
+
+    Rect damage = {};
+
+    if (from_mode != to_mode) {
+        Rect mode_damage = {};
+        for (uint8_t i = 0; i < mode_button_count_; i++) {
+            const ClimateMode button_mode = mode_buttons_[i];
+            draw_mode_button(display, &mode_rects_[i], button_mode, button_mode == to_mode, white);
+            mode_damage = union_rects(&mode_damage, &mode_rects_[i]);
+        }
+        damage = union_rects(&damage, &mode_damage);
+    }
+
+    if (from_temp_steps != to_temp_steps) {
+        draw_temp_value(display, &temp_adjust_value_rect_, climate_steps_to_celsius(to_temp_steps), white);
+        damage = union_rects(&damage, &temp_adjust_value_rect_);
+    }
+
+    return damage;
 }
 
 void ClimateWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
@@ -247,19 +304,14 @@ void ClimateWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
 
     display->fillRoundRect(minus_rect_.x, minus_rect_.y, minus_rect_.w, minus_rect_.h, 12, white);
     display->fillRoundRect(plus_rect_.x, plus_rect_.y, plus_rect_.w, plus_rect_.h, 12, white);
-    display->fillRoundRect(temp_adjust_value_rect_.x, temp_adjust_value_rect_.y, temp_adjust_value_rect_.w, temp_adjust_value_rect_.h, 12, white);
     display->drawRoundRect(minus_rect_.x, minus_rect_.y, minus_rect_.w, minus_rect_.h, 12, BBEP_BLACK);
     display->drawRoundRect(plus_rect_.x, plus_rect_.y, plus_rect_.w, plus_rect_.h, 12, BBEP_BLACK);
-    display->drawRoundRect(temp_adjust_value_rect_.x, temp_adjust_value_rect_.y, temp_adjust_value_rect_.w, temp_adjust_value_rect_.h, 12, BBEP_BLACK);
 
     display->setFont(Montserrat_Regular_26);
     draw_centered_text(display, "-", &minus_rect_, -2);
     draw_centered_text(display, "+", &plus_rect_, -2);
 
-    char temp_text[16];
-    snprintf(temp_text, sizeof(temp_text), "%.1fC", temp_c);
-    display->setFont(Montserrat_Regular_20);
-    draw_centered_text(display, temp_text, &temp_adjust_value_rect_, 0, true);
+    draw_temp_value(display, &temp_adjust_value_rect_, temp_c, white);
 }
 
 bool ClimateWidget::isTouching(const TouchEvent* touch_event) const {

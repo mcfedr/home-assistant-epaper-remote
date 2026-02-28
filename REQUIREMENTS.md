@@ -148,6 +148,18 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
   - Full refresh on screen transitions
   - Partial refresh where possible for value-only updates
 
+### 4.13 Display Performance Tuning
+
+- Screen transitions (floor list, room list, room controls, and status/error pages) must use a fast clear/update profile.
+- FastEPD pass counts must be tuned for responsiveness:
+  - Partial update passes reduced from default for faster interactive updates.
+  - Full update passes reduced from default for faster screen transitions.
+- The room-controls anti-ghosting full-refresh interval must be longer than the default to avoid frequent slow refresh interruptions during active use.
+- Climate and cover widgets must support targeted partial redraws:
+  - Climate partial redraw should update only mode controls and/or temperature value regions when those values change.
+  - Cover partial redraw should update only the up/down control regions when state changes.
+- Touch release timeout must be reduced to improve perceived responsiveness for taps and swipe completion.
+
 ## 5. Non-Functional Requirements
 
 ### 5.1 Reliability
@@ -160,6 +172,8 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
 
 - Navigation transitions should feel responsive on ePaper hardware.
 - Touch interactions should not block network handling.
+- Full screen transitions should prioritize latency over maximum ghost-cleaning quality.
+- In-room control changes should prefer partial updates whenever possible.
 
 ### 5.3 Readability and Usability
 
@@ -191,3 +205,5 @@ It should be fast to navigate, reliable for daily use, and simple to understand.
 - Back navigation works consistently between all navigation levels.
 - Front home button returns to the floor list root from room list or room controls.
 - UI reflects external Home Assistant state changes after initial load.
+- Page transitions feel faster than previous `CLEAR_SLOW` behavior.
+- In-room climate and cover control updates visibly redraw only the changed control regions.
