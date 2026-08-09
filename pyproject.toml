@@ -7,3 +7,18 @@ requires-python = ">=3.14"
 dependencies = [
     "pillow>=12.1.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pyserial>=3.5",
+    "requests>=2.32",
+    "python-dotenv>=1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["e2e"]
+markers = [
+    "device: requires the physical device and Home Assistant (deselect with -m 'not device')",
+    "slow: long-running tests (standby timeout)",
+]

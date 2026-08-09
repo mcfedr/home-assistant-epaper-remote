@@ -272,6 +272,7 @@ static uint8_t room_controls_page_count_locked(const EntityStore* store, int8_t 
 
 void store_init(EntityStore* store) {
     store->mutex = xSemaphoreCreateMutex();
+    store->epaper_mutex = xSemaphoreCreateMutex();
     store->event_group = xEventGroupCreate();
     store->last_interaction_ms = static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
     store->standby_last_refresh_ms = store->last_interaction_ms;
@@ -1499,6 +1500,27 @@ void store_bump_rooms_revision(EntityStore* store) {
 
 void store_wait_for_wifi_up(EntityStore* store) {
     xEventGroupWaitBits(store->event_group, BIT_WIFI_UP, pdFALSE, pdTRUE, portMAX_DELAY);
+}
+
+void store_get_harness_info(EntityStore* store, HarnessInfoSnapshot* snapshot) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    snapshot->wifi = store->wifi;
+    snapshot->home_assistant = store->home_assistant;
+    snapshot->wifi_connected = store->wifi_connected;
+    copy_string(snapshot->ip_address, sizeof(snapshot->ip_address), store->wifi_ip_address);
+    copy_string(snapshot->ssid, sizeof(snapshot->ssid), store->wifi_connected_ssid);
+    snapshot->rssi = store->wifi_rssi;
+    xSemaphoreGive(store->mutex);
+}
+
+void store_get_harness_entity(EntityStore* store, uint8_t entity_idx, HarnessWidgetEntity* out) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const HomeAssistantEntity& entity = store->entities[entity_idx];
+    copy_string(out->entity_id, sizeof(out->entity_id), entity.entity_id);
+    copy_string(out->display_name, sizeof(out->display_name), entity.display_name);
+    out->command_type = entity.command_type;
+    out->current_value = entity.current_value;
+    xSemaphoreGive(store->mutex);
 }
 
 void store_flush_pending_commands(EntityStore* store) {

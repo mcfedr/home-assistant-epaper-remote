@@ -9,6 +9,7 @@ struct Screen {
     size_t widget_count;
     Widget* widgets[MAX_WIDGETS_PER_SCREEN];
     uint8_t entity_ids[MAX_WIDGETS_PER_SCREEN];
+    Rect widget_rects[MAX_WIDGETS_PER_SCREEN];
 };
 
 struct SliderConfig {

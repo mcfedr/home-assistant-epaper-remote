@@ -1441,6 +1441,7 @@ void ui_task(void* arg) {
         }
 
         if (ulTaskNotifyTake(pdTRUE, notify_timeout)) {
+            xSemaphoreTake(ctx->store->epaper_mutex, portMAX_DELAY);
             store_update_ui_state(ctx->store, ctx->screen, &current_state);
 
             const bool mode_changed = current_state.mode != displayed_state.mode;
@@ -1568,9 +1569,11 @@ void ui_task(void* arg) {
 
             displayed_state = current_state;
             ui_state_set(ctx->shared_state, &displayed_state);
+            xSemaphoreGive(ctx->store->epaper_mutex);
         } else if (display_is_dirty && displayed_state.mode == UiMode::RoomControls) {
             ESP_LOGI(TAG, "Forcing a full refresh of the display");
 
+            xSemaphoreTake(ctx->store->epaper_mutex, portMAX_DELAY);
             ctx->epaper->setMode(BB_MODE_4BPP);
             ctx->epaper->fillScreen(0xf);
             ui_draw_room_controls_header(ctx->epaper, room_controls_snapshot.room_name, displayed_state.room_controls_page,
@@ -1586,6 +1589,7 @@ void ui_task(void* arg) {
             ctx->epaper->backupPlane();
 
             display_is_dirty = false;
+            xSemaphoreGive(ctx->store->epaper_mutex);
         }
     }
 }

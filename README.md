@@ -141,6 +141,22 @@ pio run -e m5-papers3 -t monitor
 - If upload fails with a busy serial port, close monitor and run upload again.
 - The Lilygo environment enables `esp32_exception_decoder` in monitor filters, so stack traces are decoded automatically.
 
+## Testing
+
+The firmware includes an HTTP test harness (port 8080, available once Wi-Fi is up) used by the e2e suite in `e2e/`:
+
+- `GET /health`, `GET /state` — device status and UI state as JSON
+- `POST /tap {"x":..,"y":..}`, `POST /swipe {"x1":..,"y1":..,"x2":..,"y2":..}`, `POST /home` — synthetic input
+- `GET /screenshot` — raw framebuffer dump (decoded to PNG by the test client)
+
+Run the tests with the device flashed and reachable (configuration via `.env`, see `e2e/config.py`):
+
+```bash
+uv run pytest -m "not slow"
+```
+
+Note the tests actuate the real Home Assistant entities configured in `.env`.
+
 ## Notes
 
 ### Continuous Integration

@@ -213,9 +213,26 @@ struct EntityStore {
     StandbySnapshot standby = {};
 
     SemaphoreHandle_t mutex;
+    SemaphoreHandle_t epaper_mutex; // held by ui_task while drawing; harness screenshot/widget reads take it
     TaskHandle_t home_assistant_task;
     TaskHandle_t ui_task;
     EventGroupHandle_t event_group = nullptr;
+};
+
+struct HarnessInfoSnapshot {
+    ConnState wifi;
+    ConnState home_assistant;
+    bool wifi_connected;
+    char ip_address[MAX_WIFI_IP_LEN];
+    char ssid[MAX_WIFI_SSID_LEN];
+    int16_t rssi;
+};
+
+struct HarnessWidgetEntity {
+    char entity_id[MAX_ENTITY_ID_LEN];
+    char display_name[MAX_ENTITY_NAME_LEN];
+    CommandType command_type;
+    uint8_t current_value;
 };
 
 struct Command {
@@ -281,5 +298,7 @@ bool store_is_standby_active(EntityStore* store);
 void store_update_ui_state(EntityStore* store, const Screen* screen, UIState* ui_state);
 void store_bump_rooms_revision(EntityStore* store);
 void store_wait_for_wifi_up(EntityStore* store);
+void store_get_harness_info(EntityStore* store, HarnessInfoSnapshot* snapshot);
+void store_get_harness_entity(EntityStore* store, uint8_t entity_idx, HarnessWidgetEntity* out);
 void store_flush_pending_commands(EntityStore* store);
 EntityRef store_add_entity(EntityStore* store, EntityConfig entity);

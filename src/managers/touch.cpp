@@ -1,4 +1,5 @@
 #include "managers/touch.h"
+#include "managers/harness.h"
 #include "managers/wifi.h"
 #include "boards.h"
 #include "constants.h"
@@ -474,7 +475,7 @@ void touch_task(void* arg) {
             }
         }
 
-        if (bbct->getSamples(&ti)) {
+        if (harness_get_samples(bbct, &ti)) {
             last_touch_ms = now_ms;
             store_note_interaction(store, last_touch_ms);
             ui_state_copy(ctx->state, &ui_state_version, ui_state);

@@ -25,6 +25,7 @@ void screen_add_slider(SliderConfig config, Screen* screen) {
     const uint16_t widget_idx = screen->widget_count++;
     screen->widgets[widget_idx] = widget;
     screen->entity_ids[widget_idx] = config.entity_ref.index;
+    screen->widget_rects[widget_idx] = rect;
 }
 
 void screen_add_button(ButtonConfig config, Screen* screen) {
@@ -47,6 +48,7 @@ void screen_add_button(ButtonConfig config, Screen* screen) {
     const uint16_t widget_idx = screen->widget_count++;
     screen->widgets[widget_idx] = widget;
     screen->entity_ids[widget_idx] = config.entity_ref.index;
+    screen->widget_rects[widget_idx] = rect;
 }
 
 void screen_add_climate(ClimateConfig config, Screen* screen) {
@@ -69,6 +71,7 @@ void screen_add_climate(ClimateConfig config, Screen* screen) {
     const uint16_t widget_idx = screen->widget_count++;
     screen->widgets[widget_idx] = widget;
     screen->entity_ids[widget_idx] = config.entity_ref.index;
+    screen->widget_rects[widget_idx] = rect;
 }
 
 void screen_add_cover(CoverConfig config, Screen* screen) {
@@ -91,6 +94,7 @@ void screen_add_cover(CoverConfig config, Screen* screen) {
     const uint16_t widget_idx = screen->widget_count++;
     screen->widgets[widget_idx] = widget;
     screen->entity_ids[widget_idx] = config.entity_ref.index;
+    screen->widget_rects[widget_idx] = rect;
 }
 
 void screen_clear(Screen* screen) {
@@ -98,6 +102,7 @@ void screen_clear(Screen* screen) {
         delete screen->widgets[idx];
         screen->widgets[idx] = nullptr;
         screen->entity_ids[idx] = 0;
+        screen->widget_rects[idx] = Rect{};
     }
     screen->widget_count = 0;
 }
