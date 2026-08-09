@@ -17,5 +17,6 @@ private:
     Rect hit_rect_;
     Rect label_rect_;
     Rect up_rect_;
+    Rect stop_rect_;
     Rect down_rect_;
 };

@@ -109,12 +109,11 @@ static void truncate_with_ellipsis(FASTEPD* display, char* text, size_t text_len
     text[text_len - 1] = '\0';
 }
 
-static void draw_cover_action_button(FASTEPD* display, const Rect* rect, bool up, bool active, uint8_t white) {
+static void draw_cover_action_button(FASTEPD* display, const Rect* rect, const uint8_t* icon, bool active, uint8_t white) {
     const uint8_t fill = active ? BBEP_BLACK : white;
     display->fillRoundRect(rect->x, rect->y, rect->w, rect->h, 12, fill);
     display->drawRoundRect(rect->x, rect->y, rect->w, rect->h, 12, BBEP_BLACK);
 
-    const uint8_t* icon = up ? cover_up : cover_down;
     const int16_t icon_x = static_cast<int16_t>(rect->x) + std::max<int16_t>(0, (static_cast<int16_t>(rect->w) - BUTTON_ICON_SIZE) / 2);
     const int16_t icon_y = static_cast<int16_t>(rect->y) + std::max<int16_t>(0, (static_cast<int16_t>(rect->h) - BUTTON_ICON_SIZE) / 2);
     const uint8_t fg = active ? white : BBEP_BLACK;
@@ -144,21 +143,21 @@ CoverWidget::CoverWidget(const char* label, Rect rect)
 
     const int16_t buttons_x = rect_x + pad;
     const int16_t buttons_w = rect_w - 2 * pad;
-    const int16_t button_w = (buttons_w - gap) / 2;
+    const int16_t button_w = (buttons_w - 2 * gap) / 3;
     up_rect_ = make_rect(buttons_x, button_y, button_w, button_h);
-    down_rect_ = make_rect(buttons_x + button_w + gap, button_y, buttons_w - button_w - gap, button_h);
+    stop_rect_ = make_rect(buttons_x + button_w + gap, button_y, button_w, button_h);
+    down_rect_ = make_rect(buttons_x + 2 * (button_w + gap), button_y, buttons_w - 2 * (button_w + gap), button_h);
 }
 
 Rect CoverWidget::partialDraw(FASTEPD* display, BitDepth depth, uint8_t from, uint8_t to) {
-    const bool from_up_active = from != 0;
-    const bool to_up_active = to != 0;
-    if (from_up_active == to_up_active) {
+    if (from == to) {
         return Rect{};
     }
 
     const uint8_t white = depth == BitDepth::BD_4BPP ? 0xf : BBEP_WHITE;
-    draw_cover_action_button(display, &up_rect_, true, to_up_active, white);
-    draw_cover_action_button(display, &down_rect_, false, !to_up_active, white);
+    draw_cover_action_button(display, &up_rect_, cover_up, to == 1, white);
+    draw_cover_action_button(display, &stop_rect_, cover_stop, to == 2, white);
+    draw_cover_action_button(display, &down_rect_, cover_down, to == 0, white);
     return union_rects(&up_rect_, &down_rect_);
 }
 
@@ -175,9 +174,9 @@ void CoverWidget::fullDraw(FASTEPD* display, BitDepth depth, uint8_t value) {
     truncate_with_ellipsis(display, draw_label, sizeof(draw_label), static_cast<int16_t>(label_rect_.w));
     draw_centered_text(display, draw_label, &label_rect_, true);
 
-    const bool up_active = value != 0;
-    draw_cover_action_button(display, &up_rect_, true, up_active, white);
-    draw_cover_action_button(display, &down_rect_, false, !up_active, white);
+    draw_cover_action_button(display, &up_rect_, cover_up, value == 1, white);
+    draw_cover_action_button(display, &stop_rect_, cover_stop, value == 2, white);
+    draw_cover_action_button(display, &down_rect_, cover_down, value == 0, white);
 }
 
 bool CoverWidget::isTouching(const TouchEvent* touch_event) const {
@@ -190,6 +189,9 @@ uint8_t CoverWidget::getValueFromTouch(const TouchEvent* touch_event, uint8_t or
     }
     if (point_in_rect(touch_event, &up_rect_)) {
         return 1;
+    }
+    if (point_in_rect(touch_event, &stop_rect_)) {
+        return 2;
     }
     if (point_in_rect(touch_event, &down_rect_)) {
         return 0;

@@ -19,17 +19,30 @@ def test_cover_from_device(at_home, ha, cfg):
         pytest.skip(f"{cfg.cover_entity} not on the first controls page")
 
     rect = widget["rect"]
-    # CoverWidget: Up control on the left half, Down control on the right half
-    left = (rect["x"] + rect["w"] // 4, rect["y"] + rect["h"] // 2)
-    right = (rect["x"] + 3 * rect["w"] // 4, rect["y"] + rect["h"] // 2)
-    down, up = (right, left) if original == "open" else (left, right)
+    # CoverWidget: Up | Stop | Down thirds
+    left = (rect["x"] + rect["w"] // 6, rect["y"] + rect["h"] // 2)
+    middle = (rect["x"] + rect["w"] // 2, rect["y"] + rect["h"] // 2)
+    right = (rect["x"] + 5 * rect["w"] // 6, rect["y"] + rect["h"] // 2)
+    down = right if original == "open" else left
 
     moving_or_moved = {"closing", "opening", "closed" if original == "open" else "open"}
     try:
         at_home.tap(*down)
         ha.wait_for_state(cfg.cover_entity, moving_or_moved, timeout=15)
+
+        # Stop mid-travel and verify the cover settles without completing
+        import time
+
+        time.sleep(2)
+        at_home.tap(*middle)
+
+        # The blinds report position lazily; wait for a mid-travel position to
+        # show up rather than sampling the (stale) state right after the tap.
+        def stopped_mid_travel(s):
+            position = s["attributes"].get("current_position")
+            return s["state"] not in ("closing", "opening") and position is not None and 0 < position < 100
+
+        ha.wait_for(stopped_mid_travel, cfg.cover_entity, timeout=30)
     finally:
-        # Reverse to the original position
-        at_home.tap(*up)
         ha.call_service("cover", "open_cover" if original == "open" else "close_cover", {"entity_id": cfg.cover_entity})
-        ha.wait_for_state(cfg.cover_entity, {original}, timeout=60)
+        ha.wait_for_state(cfg.cover_entity, {original}, timeout=90)

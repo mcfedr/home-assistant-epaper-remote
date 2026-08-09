@@ -1995,7 +1995,8 @@ void hass_send_command(home_assistant_context_t* hass, Command* cmd) {
     case CommandType::SetCoverOpenClose: {
         cJSON* service_data = cJSON_CreateObject();
         cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
-        hass_send_call_service(hass, "cover", cmd->value == 0 ? "close_cover" : "open_cover", service_data);
+        const char* service = cmd->value == 0 ? "close_cover" : (cmd->value == 2 ? "stop_cover" : "open_cover");
+        hass_send_call_service(hass, "cover", service, service_data);
         break;
     }
     case CommandType::SetFanSpeedPercentage: {
