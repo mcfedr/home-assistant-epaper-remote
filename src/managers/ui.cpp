@@ -455,7 +455,9 @@ static void ui_draw_settings_icon(FASTEPD* epaper, int16_t center_x, int16_t cen
 }
 
 static void ui_draw_back_button(FASTEPD* epaper) {
-    epaper->fillRoundRect(ROOM_CONTROLS_BACK_X, ROOM_CONTROLS_BACK_Y, ROOM_CONTROLS_BACK_W, ROOM_CONTROLS_BACK_H, 14, BBEP_WHITE);
+    // BBEP_WHITE is the 1bpp constant (1); in 4bpp mode that value is nearly black
+    const uint8_t white = epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xf;
+    epaper->fillRoundRect(ROOM_CONTROLS_BACK_X, ROOM_CONTROLS_BACK_Y, ROOM_CONTROLS_BACK_W, ROOM_CONTROLS_BACK_H, 14, white);
     epaper->drawRoundRect(ROOM_CONTROLS_BACK_X, ROOM_CONTROLS_BACK_Y, ROOM_CONTROLS_BACK_W, ROOM_CONTROLS_BACK_H, 14, BBEP_BLACK);
     ui_draw_back_icon(epaper);
 }
@@ -475,10 +477,10 @@ static void ui_draw_floor_list_header(FASTEPD* epaper) {
     epaper->loadBMP(home_outline, icon_x, icon_y, 0xe, BBEP_BLACK);
 
     epaper->setFont(Montserrat_Regular_26);
-    draw_text_at(epaper, text_x, header_y + 42, "Home");
+    draw_text_at(epaper, text_x, header_y + 46, "Home");
 
     epaper->setFont(Montserrat_Regular_16);
-    draw_text_at(epaper, text_x, header_y + 68, "Choose a floor", true);
+    draw_text_at(epaper, text_x, header_y + 72, "Choose a floor", true);
 
     epaper->fillRoundRect(HOME_SETTINGS_BUTTON_X, HOME_SETTINGS_BUTTON_Y, HOME_SETTINGS_BUTTON_W, HOME_SETTINGS_BUTTON_H, 14, 0xf);
     epaper->drawRoundRect(HOME_SETTINGS_BUTTON_X, HOME_SETTINGS_BUTTON_Y, HOME_SETTINGS_BUTTON_W, HOME_SETTINGS_BUTTON_H, 14, BBEP_BLACK);
@@ -1398,7 +1400,13 @@ void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, uint8_
     epaper->setFont(Montserrat_Regular_20);
     epaper->setTextColor(BBEP_BLACK);
 
-    epaper->fillRect(0, 0, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, 0xe);
+    // In the 1bpp partial-update plane there is no gray; use white so partial
+    // refreshes that clip the header don't paint black bars
+    const uint8_t band = epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xe;
+    epaper->fillRect(0, 0, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, band);
+    if (epaper->getMode() == BB_MODE_1BPP) {
+        epaper->drawLine(0, ROOM_CONTROLS_HEADER_HEIGHT - 1, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT - 1, BBEP_BLACK);
+    }
     ui_draw_back_button(epaper);
 
     char room_label[MAX_ROOM_NAME_LEN];
