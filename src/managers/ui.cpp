@@ -77,23 +77,6 @@ static const uint8_t* ui_icon_for_ha_icon(const char* icon_name) {
     return home_outline;
 }
 
-static bool ui_draw_room_tile_icon(FASTEPD* epaper, int16_t tile_x, int16_t tile_y, int16_t tile_w, int16_t tile_h, const char* icon_name) {
-    const uint8_t* icon = ui_icon_for_ha_icon(icon_name);
-    if (!icon) {
-        return false;
-    }
-
-    const int16_t reserved_height = ROOM_LIST_TILE_ICON_TOP_PADDING + ROOM_LIST_TILE_ICON_SIZE + ROOM_LIST_TILE_ICON_LABEL_GAP;
-    if (reserved_height >= tile_h) {
-        return false;
-    }
-
-    const int16_t icon_x = tile_x + (tile_w - ROOM_LIST_TILE_ICON_SIZE) / 2;
-    const int16_t icon_y = tile_y + ROOM_LIST_TILE_ICON_TOP_PADDING;
-    epaper->loadBMP(icon, icon_x, icon_y, 0xf, BBEP_BLACK);
-    return true;
-}
-
 void accumulate_damage(Rect& acc, const Rect& r) {
     if (r.w <= 0 || r.h <= 0) {
         return;
@@ -366,58 +349,73 @@ static void truncate_with_ellipsis(FASTEPD* epaper, char* line, size_t line_len,
     line[line_len - 1] = '\0';
 }
 
-static void ui_draw_room_tile_label(FASTEPD* epaper, int16_t label_x, int16_t label_y, int16_t label_w, int16_t label_h, const char* name) {
-    constexpr int16_t pad_x = 12;
-    constexpr int16_t pad_y = 6;
-    const int16_t max_w = label_w - pad_x * 2;
-    const int16_t max_h = label_h - pad_y * 2;
-    if (max_w <= 0 || max_h <= 0) {
-        return;
-    }
-
+struct TileLabelLayout {
     char line1[64];
     char line2[64];
+    uint8_t font_idx;
+    int16_t w1, h1, ascent1;
+    int16_t w2, h2, ascent2;
+    int16_t line_gap;
+    int16_t total_h;
+};
+
+// getStringBox reports the box relative to the cursor; measuring at cursor 0
+// makes -rect.y the ascent, needed to place text by its top edge.
+static void measure_line(FASTEPD* epaper, const char* text, int16_t* w, int16_t* h, int16_t* ascent) {
+    epaper->setCursor(0, 0);
+    BB_RECT rect = get_text_box(epaper, text);
+    *w = rect.w;
+    *h = rect.h;
+    *ascent = static_cast<int16_t>(-rect.y);
+}
+
+static void ui_measure_room_tile_label(FASTEPD* epaper, const char* name, int16_t max_w, int16_t max_h, TileLabelLayout* out) {
+    strncpy(out->line1, name, sizeof(out->line1) - 1);
+    out->line1[sizeof(out->line1) - 1] = '\0';
+    out->line2[0] = '\0';
+
     char split1[64];
     char split2[64];
-    strncpy(line1, name, sizeof(line1) - 1);
-    line1[sizeof(line1) - 1] = '\0';
-    line2[0] = '\0';
-
     bool has_split = split_room_name(name, split1, sizeof(split1), split2, sizeof(split2));
-    uint8_t one_line_font = fit_font_for_lines(epaper, line1, "", max_w, max_h);
+    uint8_t one_line_font = fit_font_for_lines(epaper, out->line1, "", max_w, max_h);
     uint8_t split_font = has_split ? fit_font_for_lines(epaper, split1, split2, max_w, max_h) : 255;
 
-    uint8_t font_idx = one_line_font;
-    if (split_font < font_idx) {
-        strncpy(line1, split1, sizeof(line1) - 1);
-        line1[sizeof(line1) - 1] = '\0';
-        strncpy(line2, split2, sizeof(line2) - 1);
-        line2[sizeof(line2) - 1] = '\0';
-        font_idx = split_font;
+    out->font_idx = one_line_font;
+    if (split_font < out->font_idx) {
+        strncpy(out->line1, split1, sizeof(out->line1) - 1);
+        out->line1[sizeof(out->line1) - 1] = '\0';
+        strncpy(out->line2, split2, sizeof(out->line2) - 1);
+        out->line2[sizeof(out->line2) - 1] = '\0';
+        out->font_idx = split_font;
     }
 
-    if (font_idx == 255) {
-        font_idx = 2;
-        line2[0] = '\0';
+    if (out->font_idx == 255) {
+        out->font_idx = 2;
+        out->line2[0] = '\0';
     }
 
-    set_room_list_font(epaper, font_idx);
-    truncate_with_ellipsis(epaper, line1, sizeof(line1), max_w);
-    if (line2[0] != '\0') {
-        truncate_with_ellipsis(epaper, line2, sizeof(line2), max_w);
+    set_room_list_font(epaper, out->font_idx);
+    truncate_with_ellipsis(epaper, out->line1, sizeof(out->line1), max_w);
+    measure_line(epaper, out->line1, &out->w1, &out->h1, &out->ascent1);
+    out->w2 = out->h2 = out->ascent2 = 0;
+    out->line_gap = 0;
+    out->total_h = out->h1;
+    if (out->line2[0] != '\0') {
+        truncate_with_ellipsis(epaper, out->line2, sizeof(out->line2), max_w);
+        measure_line(epaper, out->line2, &out->w2, &out->h2, &out->ascent2);
+        out->line_gap = out->font_idx == 0 ? 10 : 4;
+        out->total_h = static_cast<int16_t>(out->h1 + out->line_gap + out->h2);
     }
+}
 
-    BB_RECT rect1 = get_text_box(epaper, line1);
-    BB_RECT rect2 = line2[0] != '\0' ? get_text_box(epaper, line2) : BB_RECT{};
-    const bool two_lines = line2[0] != '\0';
-    const int16_t gap = font_idx == 0 ? 10 : 4;
-    const int16_t total_h = two_lines ? static_cast<int16_t>(rect1.h + rect2.h + gap) : rect1.h;
-    const int16_t top = label_y + (label_h - total_h) / 2;
-    const bool reinforce = font_idx != 0;
-    draw_text_at(epaper, label_x + (label_w - rect1.w) / 2, top, line1, reinforce);
+static void ui_draw_room_tile_label(FASTEPD* epaper, const TileLabelLayout* layout, int16_t tile_x, int16_t tile_w, int16_t text_top) {
+    set_room_list_font(epaper, layout->font_idx);
+    const bool reinforce = layout->font_idx != 0;
+    draw_text_at(epaper, tile_x + (tile_w - layout->w1) / 2, text_top + layout->ascent1, layout->line1, reinforce);
 
-    if (two_lines) {
-        draw_text_at(epaper, label_x + (label_w - rect2.w) / 2, top + rect1.h + gap, line2, reinforce);
+    if (layout->line2[0] != '\0') {
+        draw_text_at(epaper, tile_x + (tile_w - layout->w2) / 2,
+                     text_top + layout->h1 + layout->line_gap + layout->ascent2, layout->line2, reinforce);
     }
 }
 
@@ -548,17 +546,23 @@ static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_
         if (tile_w > 10 && tile_h > 10) {
             epaper->drawRoundRect(tile_x + 3, tile_y + 3, tile_w - 6, tile_h - 6, ROOM_LIST_TILE_RADIUS - 4, 0xd);
         }
+
+        // The icon, gap and label are centered in the tile as a single group
         const char* icon_name = icons ? icons[idx] : nullptr;
-        const bool has_icon = ui_draw_room_tile_icon(epaper, tile_x, tile_y, tile_w, tile_h, icon_name);
+        const uint8_t* icon = ui_icon_for_ha_icon(icon_name);
+        const int16_t icon_block = ROOM_LIST_TILE_ICON_SIZE + ROOM_LIST_TILE_ICON_LABEL_GAP;
+        const bool has_icon = icon != nullptr && tile_h >= icon_block + 56;
 
-        int16_t label_y = tile_y + 4;
-        int16_t label_h = tile_h - 8;
+        TileLabelLayout label;
+        const int16_t label_max_h = tile_h - 24 - (has_icon ? icon_block : 0);
+        ui_measure_room_tile_label(epaper, names[idx], tile_w - 24, label_max_h, &label);
+
+        const int16_t group_h = (has_icon ? icon_block : 0) + label.total_h;
+        const int16_t group_top = tile_y + (tile_h - group_h) / 2 - 2;
         if (has_icon) {
-            label_y = tile_y + ROOM_LIST_TILE_ICON_TOP_PADDING + ROOM_LIST_TILE_ICON_SIZE + ROOM_LIST_TILE_ICON_LABEL_GAP;
-            label_h = tile_h - (label_y - tile_y) - ROOM_LIST_TILE_LABEL_BOTTOM_PADDING;
+            epaper->loadBMP(icon, tile_x + (tile_w - ROOM_LIST_TILE_ICON_SIZE) / 2, group_top, 0xf, BBEP_BLACK);
         }
-
-        ui_draw_room_tile_label(epaper, tile_x, label_y, tile_w, label_h, names[idx]);
+        ui_draw_room_tile_label(epaper, &label, tile_x, tile_w, group_top + (has_icon ? icon_block : 0));
     }
 
     if (total_pages > 1) {
