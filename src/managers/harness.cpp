@@ -134,6 +134,8 @@ static const char* command_type_name(CommandType type) {
         return "automation";
     case CommandType::RefreshStandbyBatterySoc:
         return "battery_soc";
+    case CommandType::ValveOpenClose:
+        return "valve";
     }
     return "unknown";
 }

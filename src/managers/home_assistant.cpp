@@ -1398,7 +1398,7 @@ void hass_parse_entity_update(home_assistant_context_t* hass, uint8_t widget_idx
         entity_mode = static_cast<uint8_t>(mode);
         entity_value = static_cast<int8_t>(temp_steps);
         value = climate_pack_value(mode, temp_steps);
-    } else if (command_type == CommandType::SetCoverOpenClose) {
+    } else if (command_type == CommandType::SetCoverOpenClose || command_type == CommandType::ValveOpenClose) {
         bool is_open = entity_mode != 0;
         if (cJSON_IsString(state)) {
             if (strcmp(state->valuestring, "open") == 0 || strcmp(state->valuestring, "opening") == 0) {
@@ -1685,6 +1685,8 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
                 continue;
             }
             command_type = CommandType::SetCoverOpenClose;
+        } else if (strncmp(entity_id_item->valuestring, "valve.", 6) == 0) {
+            command_type = CommandType::ValveOpenClose;
         } else {
             continue;
         }
@@ -1997,6 +1999,12 @@ void hass_send_command(home_assistant_context_t* hass, Command* cmd) {
         cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
         const char* service = cmd->value == 0 ? "close_cover" : (cmd->value == 2 ? "stop_cover" : "open_cover");
         hass_send_call_service(hass, "cover", service, service_data);
+        break;
+    }
+    case CommandType::ValveOpenClose: {
+        cJSON* service_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(service_data, "entity_id", cmd->entity_id);
+        hass_send_call_service(hass, "valve", cmd->value == 0 ? "close_valve" : "open_valve", service_data);
         break;
     }
     case CommandType::SetFanSpeedPercentage: {

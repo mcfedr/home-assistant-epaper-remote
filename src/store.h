@@ -17,6 +17,7 @@ enum class CommandType : uint8_t {
     SwitchOnOff,
     AutomationOnOff,
     RefreshStandbyBatterySoc,
+    ValveOpenClose,
 };
 
 struct HomeAssistantEntity {
