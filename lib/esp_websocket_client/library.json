@@ -1,0 +1,9 @@
+{
+  "name": "esp_websocket_client",
+  "version": "1.8.0",
+  "description": "Vendored from espressif/esp-protocols (websocket-v1.8.0). The component was removed from the ESP-IDF 5 core libraries bundled with arduino-esp32 3.x.",
+  "license": "Apache-2.0",
+  "build": {
+    "includeDir": "include"
+  }
+}

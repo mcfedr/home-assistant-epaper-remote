@@ -186,26 +186,11 @@ static void wifi_clear_custom_profile() {
     ESP_LOGI(TAG, "cleared active custom profile");
 }
 
-// The Arduino core (2.x) leaves sae_pwe_h2e at hunt-and-peck only. WPA2/WPA3
-// transition APs (e.g. UniFi) mandate the H2E variant, so SAE attempts are
-// rejected and the station loops on AUTH_EXPIRE/AUTH_FAIL. Allow both methods.
+// arduino-esp32 3.x defaults sae_pwe_h2e to WPA3_SAE_PWE_BOTH, which WPA2/WPA3
+// transition APs (e.g. UniFi) require; nothing extra to configure since the
+// core 2.x -> 3.x migration.
 static void wifi_connect_with_h2e(const char* ssid, const char* password) {
-    WiFi.begin(ssid, password, 0, nullptr, /*connect=*/false);
-
-    wifi_config_t conf;
-    esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &conf);
-    if (err == ESP_OK) {
-        conf.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-        err = esp_wifi_set_config(WIFI_IF_STA, &conf);
-    }
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "failed to apply SAE H2E config: %s", esp_err_to_name(err));
-    }
-
-    err = esp_wifi_connect();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "esp_wifi_connect: %s", esp_err_to_name(err));
-    }
+    WiFi.begin(ssid, password);
 }
 
 static bool wifi_start_connection(const char* ssid, const char* password, bool custom_profile_active) {
