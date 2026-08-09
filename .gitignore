@@ -5,3 +5,4 @@ src/config_remote.cpp
 src/assets/icons.h
 .env
 e2e/artifacts
+__pycache__
