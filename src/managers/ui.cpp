@@ -869,6 +869,10 @@ static void format_weather_condition(const char* raw, char* out, size_t out_len)
         ui_copy_string(out, out_len, "No forecast");
         return;
     }
+    if (strcasecmp(raw, "partlycloudy") == 0) { // the only HA condition id without a separator
+        ui_copy_string(out, out_len, "Partly Cloudy");
+        return;
+    }
 
     size_t out_idx = 0;
     bool capitalize_next = true;
@@ -1053,12 +1057,6 @@ void ui_draw_standby(FASTEPD* epaper, const StandbySnapshot* snapshot) {
     const uint8_t* weather_icon = ui_weather_icon_for_condition(snapshot->weather_condition);
     epaper->loadBMP(weather_icon, card_x + 20, STANDBY_WEATHER_Y + 48, 0xf, BBEP_BLACK);
 
-    char condition_line[MAX_STANDBY_CONDITION_LEN];
-    format_weather_condition(snapshot->weather_condition, condition_line, sizeof(condition_line));
-    epaper->setFont(Montserrat_Regular_26);
-    truncate_with_ellipsis(epaper, condition_line, sizeof(condition_line), card_w - 240);
-    draw_text_at(epaper, card_x + 106, STANDBY_WEATHER_Y + 92, condition_line, true);
-
     char now_temp[20];
     char hi_temp[20];
     char low_temp[20];
@@ -1068,7 +1066,24 @@ void ui_draw_standby(FASTEPD* epaper, const StandbySnapshot* snapshot) {
 
     epaper->setFont(Montserrat_Regular_26);
     BB_RECT now_rect = get_text_box(epaper, now_temp);
-    draw_text_at(epaper, card_x + card_w - now_rect.w - 18, STANDBY_WEATHER_Y + 92, now_temp, true);
+    const int16_t now_temp_x = card_x + card_w - now_rect.w - 18;
+    draw_text_at(epaper, now_temp_x, STANDBY_WEATHER_Y + 92, now_temp, true);
+
+    // The condition may use whatever space remains up to the temperature;
+    // step down through the smaller fonts rather than truncating when possible
+    char condition_line[MAX_STANDBY_CONDITION_LEN];
+    format_weather_condition(snapshot->weather_condition, condition_line, sizeof(condition_line));
+    const int16_t condition_x = card_x + 98;
+    const int16_t condition_max_w = now_temp_x - 10 - condition_x;
+    if (get_text_box(epaper, condition_line).w > condition_max_w) {
+        epaper->setFont(Montserrat_Regular_20);
+        if (get_text_box(epaper, condition_line).w > condition_max_w) {
+            epaper->setFont(Montserrat_Regular_16);
+            truncate_with_ellipsis(epaper, condition_line, sizeof(condition_line), condition_max_w);
+        }
+    }
+    draw_text_at(epaper, condition_x, STANDBY_WEATHER_Y + 92, condition_line, true);
+    epaper->setFont(Montserrat_Regular_26);
 
     char high_low[48];
     snprintf(high_low, sizeof(high_low), "%s / %s", hi_temp, low_temp);
@@ -1097,10 +1112,11 @@ void ui_draw_standby(FASTEPD* epaper, const StandbySnapshot* snapshot) {
         const uint8_t* day_icon = ui_weather_icon_for_condition(day ? day->condition : "");
         epaper->loadBMP(day_icon, slot_center_x - 32, forecast_row_y + 40, 0xf, BBEP_BLACK);
 
+        // Whole degrees: the 5-column slots are too narrow for decimals at this font size
         char day_high[16];
         char day_low[16];
-        format_temperature_text(day_high, sizeof(day_high), day && day->high_valid, day ? day->high_c : 0.0f, false);
-        format_temperature_text(day_low, sizeof(day_low), day && day->low_valid, day ? day->low_c : 0.0f, false);
+        format_temperature_text(day_high, sizeof(day_high), day && day->high_valid, day ? std::round(day->high_c) : 0.0f, false);
+        format_temperature_text(day_low, sizeof(day_low), day && day->low_valid, day ? std::round(day->low_c) : 0.0f, false);
 
         epaper->setFont(Montserrat_Regular_26);
         ui_draw_centered_text(epaper, slot_center_x, forecast_row_y + 140, day_high, true);
