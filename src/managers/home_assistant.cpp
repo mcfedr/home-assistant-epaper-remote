@@ -1909,6 +1909,10 @@ static void hass_ws_event_handler(void* handler_args, esp_event_base_t base, int
             hass_update_state(hass, ConnState::ConnectionError);
         }
         break;
+    case WEBSOCKET_EVENT_BEFORE_CONNECT:
+    case WEBSOCKET_EVENT_BEGIN:
+    case WEBSOCKET_EVENT_FINISH:
+        break;
     default:
         ESP_LOGI(TAG, "Unknown event type %d", event_id);
     }
