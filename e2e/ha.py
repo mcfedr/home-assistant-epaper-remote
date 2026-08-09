@@ -28,11 +28,14 @@ class HAClient:
 
     def wait_for_state(self, entity_id: str, expected: str | set[str], timeout: float = 15.0, poll: float = 0.5) -> dict:
         expected_states = {expected} if isinstance(expected, str) else expected
+        return self.wait_for(lambda s: s["state"] in expected_states, entity_id, timeout=timeout, poll=poll)
+
+    def wait_for(self, predicate, entity_id: str, timeout: float = 15.0, poll: float = 0.5) -> dict:
         deadline = time.monotonic() + timeout
         state = self.get_state(entity_id)
-        while state["state"] not in expected_states:
+        while not predicate(state):
             if time.monotonic() > deadline:
-                raise TimeoutError(f"{entity_id} did not reach {expected_states} within {timeout}s; state={state['state']}")
+                raise TimeoutError(f"{entity_id} condition not met within {timeout}s; state={state['state']}")
             time.sleep(poll)
             state = self.get_state(entity_id)
         return state

@@ -6,10 +6,10 @@ pytestmark = pytest.mark.device
 
 
 def test_climate_adjust_temperature(at_home, ha, cfg):
-    """Tap the climate widget's +0.5 control and verify HA target temp rises."""
+    """Set a known target via HA, wait for the device to converge, tap +0.5, verify HA."""
     original = ha.get_state(cfg.climate_entity)
-    if original["state"] == "off":
-        pytest.skip("climate is off; skipping temperature adjustment")
+    if original["state"] in ("off", "unavailable"):
+        pytest.skip(f"climate is {original['state']}; skipping temperature adjustment")
     original_temp = original["attributes"]["temperature"]
 
     state = goto_room(at_home, cfg)
@@ -17,17 +17,29 @@ def test_climate_adjust_temperature(at_home, ha, cfg):
     if widget is None:
         pytest.skip(f"{cfg.climate_entity} not on the first controls page")
 
-    rect = widget["rect"]
-    # ClimateWidget: temperature +/- on the lower row; + on the right
-    plus = (rect["x"] + rect["w"] - rect["w"] // 6, rect["y"] + rect["h"] - rect["h"] // 4)
+    base_temp = 21.0
 
     try:
+        # The AC integration polls (~30s) and drops out periodically; use generous timeouts
+        ha.call_service("climate", "set_temperature", {"entity_id": cfg.climate_entity, "temperature": base_temp})
+        ha.wait_for(lambda s: s["attributes"]["temperature"] == base_temp, cfg.climate_entity, timeout=40)
+
+        # Wait for the device widget to pick up the pushed state; remember its packed value.
+        # One temperature step (0.5C) is one increment of the packed value.
+        baseline = at_home.wait_for(
+            lambda s: (find_widget(s, cfg.climate_entity) or {}).get("value") is not None, timeout=5
+        )
+        v0 = find_widget(baseline, cfg.climate_entity)["value"]
+        import time
+
+        time.sleep(2)  # let any in-flight updates settle
+        v0 = find_widget(at_home.state(), cfg.climate_entity)["value"]
+
+        rect = widget["rect"]
+        plus = (rect["x"] + rect["w"] - rect["w"] // 6, rect["y"] + rect["h"] - rect["h"] // 4)
         at_home.tap(*plus)
 
-        def temp_rose(_state):
-            current = ha.get_state(cfg.climate_entity)["attributes"]["temperature"]
-            return current == pytest.approx(original_temp + 0.5)
-
-        at_home.wait_for(temp_rose, timeout=15, poll=1.0)
+        at_home.wait_for(lambda s: (find_widget(s, cfg.climate_entity) or {}).get("value") == v0 + 1, timeout=10)
+        ha.wait_for(lambda s: s["attributes"]["temperature"] == base_temp + 0.5, cfg.climate_entity, timeout=40)
     finally:
         ha.call_service("climate", "set_temperature", {"entity_id": cfg.climate_entity, "temperature": original_temp})

@@ -955,6 +955,20 @@ bool store_close_settings(EntityStore* store) {
     return changed;
 }
 
+bool store_close_wifi_settings_if_open(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool changed = store->settings_mode == SettingsMode::Wifi;
+    if (changed) {
+        store->settings_mode = SettingsMode::None;
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+    return changed;
+}
+
 bool store_shift_wifi_list_page(EntityStore* store, int8_t delta) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     int16_t page = static_cast<int16_t>(store->wifi_list_page) + delta;

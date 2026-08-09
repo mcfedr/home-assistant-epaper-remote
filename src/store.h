@@ -273,6 +273,7 @@ bool store_open_wifi_password(EntityStore* store, const char* ssid);
 bool store_open_standby(EntityStore* store, uint32_t now_ms);
 bool store_settings_back(EntityStore* store);
 bool store_close_settings(EntityStore* store);
+bool store_close_wifi_settings_if_open(EntityStore* store);
 bool store_shift_wifi_list_page(EntityStore* store, int8_t delta);
 bool store_set_wifi_password_symbols(EntityStore* store, bool symbols);
 bool store_toggle_wifi_password_shift(EntityStore* store);

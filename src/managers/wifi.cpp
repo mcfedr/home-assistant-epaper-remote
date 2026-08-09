@@ -1,6 +1,7 @@
 #include "wifi.h"
 #include "config.h"
 #include "esp_log.h"
+#include "esp_wifi.h"
 #include "esp_wifi_types.h"
 #include "store.h"
 #include <Preferences.h>
@@ -8,6 +9,19 @@
 #include <cstring>
 
 static const char* TAG = "wifi";
+
+// Kept low to avoid brownouts while the e-ink panel draws; 15dBm tested worse
+// (zero associations), so raising it does not help the auth loops.
+static constexpr wifi_power_t WIFI_TX_POWER = WIFI_POWER_8_5dBm;
+
+// After repeated auth failures the AP may still hold the previous (PMF-protected)
+// session for this client; continuous reconnect attempts keep that ghost entry
+// alive. Backing off lets it expire, mirroring the manual switch-networks fix.
+static constexpr uint32_t WIFI_RECONNECT_BACKOFF_MS = 45000;
+
+// A single AUTH_FAIL does not prove a bad password: WPA3 transition-mode APs
+// emit transient AUTH_FAIL/AUTH_EXPIRE during SAE negotiation hiccups.
+static constexpr uint8_t WIFI_AUTH_FAILS_FOR_BAD_CREDENTIALS = 3;
 static constexpr const char* WIFI_PREFS_NS = "wifi";
 static constexpr const char* WIFI_PREF_SSID_KEY = "ssid";
 static constexpr const char* WIFI_PREF_PASS_KEY = "pass";
@@ -23,11 +37,14 @@ struct WifiContext {
     uint32_t last_info_refresh_ms = 0;
     uint32_t last_recovery_ms = 0;
     uint8_t consecutive_disconnects = 0;
+    uint8_t consecutive_auth_fails = 0;
+    uint32_t reconnect_pause_until_ms = 0;
     bool active_custom_profile = false;
     char active_ssid[MAX_WIFI_SSID_LEN] = {0};
     char active_password[MAX_WIFI_PASSWORD_LEN + 1] = {0};
     uint32_t boot_connect_started_ms = 0;
     bool boot_settings_fallback_shown = false;
+    bool boot_settings_auto_opened = false;
     bool pause_reconnect_for_scan = false;
 };
 
@@ -169,6 +186,28 @@ static void wifi_clear_custom_profile() {
     ESP_LOGI(TAG, "cleared active custom profile");
 }
 
+// The Arduino core (2.x) leaves sae_pwe_h2e at hunt-and-peck only. WPA2/WPA3
+// transition APs (e.g. UniFi) mandate the H2E variant, so SAE attempts are
+// rejected and the station loops on AUTH_EXPIRE/AUTH_FAIL. Allow both methods.
+static void wifi_connect_with_h2e(const char* ssid, const char* password) {
+    WiFi.begin(ssid, password, 0, nullptr, /*connect=*/false);
+
+    wifi_config_t conf;
+    esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &conf);
+    if (err == ESP_OK) {
+        conf.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+        err = esp_wifi_set_config(WIFI_IF_STA, &conf);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "failed to apply SAE H2E config: %s", esp_err_to_name(err));
+    }
+
+    err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_connect: %s", esp_err_to_name(err));
+    }
+}
+
 static bool wifi_start_connection(const char* ssid, const char* password, bool custom_profile_active) {
     if (!g_wifi.store || !ssid || ssid[0] == '\0') {
         return false;
@@ -180,6 +219,8 @@ static bool wifi_start_connection(const char* ssid, const char* password, bool c
     g_wifi.recovery_requested = false;
     g_wifi.recovery_reason = 0;
     g_wifi.consecutive_disconnects = 0;
+    g_wifi.consecutive_auth_fails = 0;
+    g_wifi.reconnect_pause_until_ms = 0;
     g_wifi.pause_reconnect_for_scan = false;
     store_set_wifi_profile(g_wifi.store, g_wifi.active_ssid, g_wifi.active_custom_profile);
 
@@ -189,9 +230,10 @@ static bool wifi_start_connection(const char* ssid, const char* password, bool c
     store_set_wifi_state(g_wifi.store, ConnState::Initializing);
     store_set_wifi_connection_info(g_wifi.store, false, "", "", -127);
 
+    WiFi.setAutoReconnect(true);
     WiFi.disconnect(false, true);
     delay(120);
-    WiFi.begin(ssid, password ? password : "");
+    wifi_connect_with_h2e(ssid, password ? password : "");
     return true;
 }
 
@@ -208,7 +250,7 @@ static void wifi_resume_connection_after_scan() {
     ESP_LOGI(TAG, "resuming connection to SSID '%s' after scan", g_wifi.active_ssid);
     store_set_wifi_connecting(g_wifi.store, true);
     store_set_wifi_state(g_wifi.store, ConnState::Initializing);
-    WiFi.begin(g_wifi.active_ssid, g_wifi.active_password);
+    wifi_connect_with_h2e(g_wifi.active_ssid, g_wifi.active_password);
 }
 
 static void wifi_request_recovery(uint8_t reason) {
@@ -235,8 +277,8 @@ static void wifi_perform_recovery() {
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
     WiFi.setSleep(false);
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
-    WiFi.begin(g_wifi.active_ssid, g_wifi.active_password);
+    WiFi.setTxPower(WIFI_TX_POWER);
+    wifi_connect_with_h2e(g_wifi.active_ssid, g_wifi.active_password);
 }
 
 static bool wifi_reason_invalid_credentials(uint8_t reason) {
@@ -399,9 +441,13 @@ void launch_wifi(Configuration* config, EntityStore* store) {
         ESP_LOGI(TAG, "received wifi event: %d", event);
 
         switch (event) {
+        case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+            ESP_LOGI(TAG, "associated (authmode=%d)", static_cast<int>(info.wifi_sta_connected.authmode));
+            break;
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
             ESP_LOGI(TAG, "obtained IP address");
             g_wifi.consecutive_disconnects = 0;
+            g_wifi.consecutive_auth_fails = 0;
             g_wifi.recovery_requested = false;
             g_wifi.recovery_reason = 0;
             g_wifi.boot_settings_fallback_shown = true;
@@ -410,13 +456,21 @@ void launch_wifi(Configuration* config, EntityStore* store) {
             store_set_wifi_connecting(store, false);
             store_set_wifi_connect_error(store, nullptr);
             wifi_refresh_connection_info();
+            if (g_wifi.boot_settings_auto_opened) {
+                // The startup fallback opened Wi-Fi settings; leave it once connected
+                g_wifi.boot_settings_auto_opened = false;
+                if (store_close_wifi_settings_if_open(store)) {
+                    ESP_LOGI(TAG, "closing auto-opened Wi-Fi settings after connect");
+                }
+            }
             break;
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: {
             const uint8_t reason = info.wifi_sta_disconnected.reason;
-            const bool invalid_credentials = wifi_reason_invalid_credentials(reason);
+            const bool auth_fail = wifi_reason_invalid_credentials(reason);
             const bool auth_expired = reason == WIFI_REASON_AUTH_EXPIRE;
             ESP_LOGI(TAG, "disconnected (reason=%d)", reason);
             g_wifi.consecutive_disconnects++;
+            g_wifi.consecutive_auth_fails = auth_fail ? static_cast<uint8_t>(g_wifi.consecutive_auth_fails + 1) : 0;
             store_set_wifi_connection_info(store, false, "", "", -127);
 
             if (g_wifi.pause_reconnect_for_scan) {
@@ -424,8 +478,9 @@ void launch_wifi(Configuration* config, EntityStore* store) {
                 break;
             }
 
-            if (invalid_credentials) {
-                ESP_LOGW(TAG, "auth failed for SSID '%s'; keeping saved credentials for manual retry/edit", g_wifi.active_ssid);
+            if (auth_fail && g_wifi.consecutive_auth_fails >= WIFI_AUTH_FAILS_FOR_BAD_CREDENTIALS) {
+                ESP_LOGW(TAG, "auth failed %u times for SSID '%s'; keeping saved credentials for manual retry/edit",
+                         static_cast<unsigned>(g_wifi.consecutive_auth_fails), g_wifi.active_ssid);
                 store_set_wifi_connecting(store, false);
                 store_set_wifi_state(store, ConnState::InvalidCredentials);
                 store_set_wifi_connect_error(store, wifi_reason_message(reason));
@@ -434,8 +489,21 @@ void launch_wifi(Configuration* config, EntityStore* store) {
 
             store_set_wifi_connect_error(store, wifi_reason_message(reason));
 
-            // Recover from repeated AUTH_EXPIRE loops by resetting the STA driver and reconnecting.
-            if (auth_expired && g_wifi.consecutive_disconnects >= 3) {
+            if (g_wifi.consecutive_disconnects >= 5) {
+                // Stop hammering the AP: pause reconnect attempts so any stale
+                // AP-side session state can expire, and escape the Boot screen
+                // so the user can tap Retry or open Wi-Fi Settings meanwhile.
+                if (g_wifi.reconnect_pause_until_ms == 0) {
+                    g_wifi.reconnect_pause_until_ms = millis() + WIFI_RECONNECT_BACKOFF_MS;
+                    WiFi.setAutoReconnect(false); // the core would otherwise keep retrying on its own
+                    ESP_LOGW(TAG, "%u consecutive failures; backing off reconnect for %lu ms",
+                             static_cast<unsigned>(g_wifi.consecutive_disconnects),
+                             static_cast<unsigned long>(WIFI_RECONNECT_BACKOFF_MS));
+                }
+                store_set_wifi_connecting(store, false);
+                store_set_wifi_state(store, ConnState::ConnectionError);
+            } else if ((auth_expired || auth_fail) && g_wifi.consecutive_disconnects >= 3) {
+                // Recover from repeated auth-failure loops by resetting the STA driver and reconnecting.
                 uint32_t now = millis();
                 if (now - g_wifi.last_recovery_ms > 8000) {
                     g_wifi.last_recovery_ms = now;
@@ -443,12 +511,6 @@ void launch_wifi(Configuration* config, EntityStore* store) {
                     store_set_wifi_state(store, ConnState::Initializing);
                     wifi_request_recovery(reason);
                 }
-            } else if (g_wifi.consecutive_disconnects >= 5) {
-                // Too many consecutive failures: escape the Boot screen so the user
-                // can tap Retry or open Wi-Fi Settings, while reconnect continues in background.
-                store_set_wifi_connecting(store, false);
-                store_set_wifi_state(store, ConnState::ConnectionError);
-                WiFi.reconnect();
             } else {
                 store_set_wifi_connecting(store, true);
                 store_set_wifi_state(store, ConnState::Initializing);
@@ -493,7 +555,7 @@ void launch_wifi(Configuration* config, EntityStore* store) {
     WiFi.disconnect(false, true);
     WiFi.setAutoReconnect(true);
     WiFi.setSleep(false);
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    WiFi.setTxPower(WIFI_TX_POWER);
 
     wifi_start_connection(boot_ssid, boot_password, use_custom_profile);
     store_set_wifi_scan_state(store, false);
@@ -542,10 +604,22 @@ void wifi_poll() {
         const bool connected = WiFi.status() == WL_CONNECTED;
         if (timeout_elapsed && !connected) {
             g_wifi.boot_settings_fallback_shown = true;
+            g_wifi.boot_settings_auto_opened = true;
             ESP_LOGW(TAG, "startup Wi-Fi connect timed out after %lu ms; opening Wi-Fi settings", static_cast<unsigned long>(now - g_wifi.boot_connect_started_ms));
             store_open_wifi_settings(g_wifi.store);
             g_wifi.scan_requested = true;
             store_set_wifi_connect_error(g_wifi.store, "Select a Wi-Fi network");
+        }
+    }
+
+    if (g_wifi.reconnect_pause_until_ms != 0 && !g_wifi.pause_reconnect_for_scan) {
+        uint32_t now = millis();
+        if (static_cast<int32_t>(now - g_wifi.reconnect_pause_until_ms) >= 0) {
+            g_wifi.reconnect_pause_until_ms = 0;
+            if (WiFi.status() != WL_CONNECTED && g_wifi.active_ssid[0] != '\0') {
+                ESP_LOGI(TAG, "backoff elapsed, retrying SSID '%s'", g_wifi.active_ssid);
+                wifi_start_connection(g_wifi.active_ssid, g_wifi.active_password, g_wifi.active_custom_profile);
+            }
         }
     }
 
