@@ -12,7 +12,7 @@ constexpr uint8_t SLIDER_OFFSET = 100;    // The zero is a bit on the right
 constexpr uint8_t TOUCH_AREA_MARGIN = 20; // Larger touch target for easier tapping
 
 // Home assistant configuration
-constexpr uint32_t HASS_MAX_JSON_BUFFER = 1024 * 256; // 256k, area/entity registries can be large
+constexpr uint32_t HASS_MAX_JSON_BUFFER = 1024 * 512; // 512k, area/entity registries can be large
 constexpr uint32_t HASS_RECONNECT_DELAY_MS = 10000;
 
 // When sending commands too fast (on a slider), this can flood
@@ -55,6 +55,14 @@ constexpr uint8_t DISPLAY_PARTIAL_UPDATE_PASSES = 2;
 constexpr uint8_t DISPLAY_FULL_UPDATE_PASSES = 4;
 constexpr uint32_t STANDBY_IDLE_TIMEOUT_MS = 120000;
 constexpr uint32_t STANDBY_REFRESH_INTERVAL_MS = 3600000; // 1 hour
+
+// Test/debug harness (HTTP server for e2e tests, see e2e/)
+constexpr uint16_t HARNESS_HTTP_PORT = 8080;
+constexpr uint32_t HARNESS_HTTPD_STACK = 8192;
+constexpr uint32_t HARNESS_TAP_HOLD_MS = 60;
+constexpr uint32_t HARNESS_SWIPE_DURATION_MS = 250;
+constexpr uint32_t HARNESS_SAMPLE_INTERVAL_MS = 20;
+constexpr size_t HARNESS_MAX_BODY_LEN = 256;
 
 // Floor/room list UI geometry
 constexpr uint16_t ROOM_LIST_TITLE_Y = 40;
