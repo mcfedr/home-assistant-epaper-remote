@@ -1,6 +1,8 @@
 #include "wifi.h"
 #include "config.h"
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 #include "store.h"
@@ -14,10 +16,18 @@ static const char* TAG = "wifi";
 // (zero associations), so raising it does not help the auth loops.
 static constexpr wifi_power_t WIFI_TX_POWER = WIFI_POWER_8_5dBm;
 
-// After repeated auth failures the AP may still hold the previous (PMF-protected)
-// session for this client; continuous reconnect attempts keep that ghost entry
-// alive. Backing off lets it expire, mirroring the manual switch-networks fix.
+// Auth-failure loops sometimes poison the Wi-Fi driver session itself: a reboot
+// (or connecting to a different network and back) fixes them instantly, while
+// plain reconnects fail for 40+ minutes. Recovery escalates accordingly:
+// deep driver reset (stop+deinit, reboot-equivalent) -> quiet backoff for any
+// AP-side state -> esp_restart as the last resort.
 static constexpr uint32_t WIFI_RECONNECT_BACKOFF_MS = 45000;
+static constexpr uint32_t WIFI_RECONNECT_BACKOFF_LONG_MS = 150000; // second and later backoffs: AP-side throttling needs real quiet
+static constexpr uint8_t WIFI_DEEP_RESETS_BEFORE_BACKOFF = 2;
+static constexpr uint8_t WIFI_BACKOFFS_BEFORE_RESTART = 2;
+static constexpr uint32_t WIFI_MAX_AUTO_RESTARTS = 2; // per unbroken outage, survives esp_restart
+
+RTC_NOINIT_ATTR static uint32_t g_wifi_auto_restart_count;
 
 // A single AUTH_FAIL does not prove a bad password: WPA3 transition-mode APs
 // emit transient AUTH_FAIL/AUTH_EXPIRE during SAE negotiation hiccups.
@@ -39,6 +49,9 @@ struct WifiContext {
     uint8_t consecutive_disconnects = 0;
     uint8_t consecutive_auth_fails = 0;
     uint32_t reconnect_pause_until_ms = 0;
+    uint8_t deep_resets_since_connect = 0;
+    uint8_t backoffs_since_connect = 0;
+    bool restart_requested = false;
     bool active_custom_profile = false;
     char active_ssid[MAX_WIFI_SSID_LEN] = {0};
     char active_password[MAX_WIFI_PASSWORD_LEN + 1] = {0};
@@ -254,11 +267,14 @@ static void wifi_perform_recovery() {
     store_set_wifi_connect_error(g_wifi.store, "Recovering Wi-Fi...");
     store_set_wifi_state(g_wifi.store, ConnState::Initializing);
 
+    g_wifi.deep_resets_since_connect++;
     WiFi.setAutoReconnect(false);
     WiFi.disconnect(false, true);
-    delay(180);
-    WiFi.mode(WIFI_MODE_NULL);
     delay(120);
+    // Full stop + esp_wifi_deinit: auth loops can poison the driver session in a
+    // way only a from-scratch init (or reboot) clears
+    WiFi.mode(WIFI_OFF);
+    delay(200);
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
     WiFi.setSleep(false);
@@ -408,6 +424,9 @@ static void wifi_handle_scan_complete(int16_t count) {
 void launch_wifi(Configuration* config, EntityStore* store) {
     g_wifi.config = config;
     g_wifi.store = store;
+    if (esp_reset_reason() != ESP_RST_SW) {
+        g_wifi_auto_restart_count = 0; // RTC_NOINIT memory is garbage on power-on
+    }
     g_wifi.scan_requested = true;
     g_wifi.scan_running = false;
     g_wifi.recovery_requested = false;
@@ -433,6 +452,9 @@ void launch_wifi(Configuration* config, EntityStore* store) {
             ESP_LOGI(TAG, "obtained IP address");
             g_wifi.consecutive_disconnects = 0;
             g_wifi.consecutive_auth_fails = 0;
+            g_wifi.deep_resets_since_connect = 0;
+            g_wifi.backoffs_since_connect = 0;
+            g_wifi_auto_restart_count = 0;
             g_wifi.recovery_requested = false;
             g_wifi.recovery_reason = 0;
             g_wifi.boot_settings_fallback_shown = true;
@@ -453,14 +475,22 @@ void launch_wifi(Configuration* config, EntityStore* store) {
             const uint8_t reason = info.wifi_sta_disconnected.reason;
             const bool auth_fail = wifi_reason_invalid_credentials(reason);
             const bool auth_expired = reason == WIFI_REASON_AUTH_EXPIRE;
+            const bool self_inflicted = reason == WIFI_REASON_ASSOC_LEAVE || reason == WIFI_REASON_AUTH_LEAVE ||
+                                        reason == WIFI_REASON_STA_LEAVING;
             ESP_LOGI(TAG, "disconnected (reason=%d)", reason);
-            g_wifi.consecutive_disconnects++;
+            if (!self_inflicted) { // our own resets/disconnects must not escalate the ladder
+                g_wifi.consecutive_disconnects++;
+            }
             g_wifi.consecutive_auth_fails = auth_fail ? static_cast<uint8_t>(g_wifi.consecutive_auth_fails + 1) : 0;
             store_set_wifi_connection_info(store, false, "", "", -127);
 
             if (g_wifi.pause_reconnect_for_scan) {
                 ESP_LOGI(TAG, "disconnect happened during scan, reconnect paused");
                 break;
+            }
+
+            if (g_wifi.reconnect_pause_until_ms != 0 || g_wifi.restart_requested) {
+                break; // backing off: stay quiet, wifi_poll resumes when the pause elapses
             }
 
             if (auth_fail && g_wifi.consecutive_auth_fails >= WIFI_AUTH_FAILS_FOR_BAD_CREDENTIALS) {
@@ -474,21 +504,10 @@ void launch_wifi(Configuration* config, EntityStore* store) {
 
             store_set_wifi_connect_error(store, wifi_reason_message(reason));
 
-            if (g_wifi.consecutive_disconnects >= 5) {
-                // Stop hammering the AP: pause reconnect attempts so any stale
-                // AP-side session state can expire, and escape the Boot screen
-                // so the user can tap Retry or open Wi-Fi Settings meanwhile.
-                if (g_wifi.reconnect_pause_until_ms == 0) {
-                    g_wifi.reconnect_pause_until_ms = millis() + WIFI_RECONNECT_BACKOFF_MS;
-                    WiFi.setAutoReconnect(false); // the core would otherwise keep retrying on its own
-                    ESP_LOGW(TAG, "%u consecutive failures; backing off reconnect for %lu ms",
-                             static_cast<unsigned>(g_wifi.consecutive_disconnects),
-                             static_cast<unsigned long>(WIFI_RECONNECT_BACKOFF_MS));
-                }
-                store_set_wifi_connecting(store, false);
-                store_set_wifi_state(store, ConnState::ConnectionError);
-            } else if ((auth_expired || auth_fail) && g_wifi.consecutive_disconnects >= 3) {
-                // Recover from repeated auth-failure loops by resetting the STA driver and reconnecting.
+            const bool auth_issue = auth_expired || auth_fail;
+            if (auth_issue && g_wifi.consecutive_disconnects >= 3 &&
+                g_wifi.deep_resets_since_connect < WIFI_DEEP_RESETS_BEFORE_BACKOFF) {
+                // Deep driver reset first: it is fast and clears the poisoned session state.
                 uint32_t now = millis();
                 if (now - g_wifi.last_recovery_ms > 8000) {
                     g_wifi.last_recovery_ms = now;
@@ -496,6 +515,26 @@ void launch_wifi(Configuration* config, EntityStore* store) {
                     store_set_wifi_state(store, ConnState::Initializing);
                     wifi_request_recovery(reason);
                 }
+            } else if ((auth_issue && g_wifi.consecutive_disconnects >= 3) || g_wifi.consecutive_disconnects >= 5) {
+                if (auth_issue && g_wifi.backoffs_since_connect >= WIFI_BACKOFFS_BEFORE_RESTART &&
+                    g_wifi_auto_restart_count < WIFI_MAX_AUTO_RESTARTS) {
+                    // Deep resets and quiet periods both failed: reboot clears
+                    // device-side poisoning outages.
+                    g_wifi.restart_requested = true;
+                } else {
+                    // Pause so any AP-side session state can expire, and escape the
+                    // Boot screen so the user can tap Retry or open Wi-Fi Settings.
+                    g_wifi.recovery_requested = false; // a queued deep reset would undo the quiet period
+                    const uint32_t backoff_ms =
+                        g_wifi.backoffs_since_connect == 0 ? WIFI_RECONNECT_BACKOFF_MS : WIFI_RECONNECT_BACKOFF_LONG_MS;
+                    g_wifi.backoffs_since_connect++;
+                    g_wifi.reconnect_pause_until_ms = millis() + backoff_ms;
+                    WiFi.setAutoReconnect(false); // the core would otherwise keep retrying on its own
+                    ESP_LOGW(TAG, "%u consecutive failures; backing off reconnect for %lu ms",
+                             static_cast<unsigned>(g_wifi.consecutive_disconnects), static_cast<unsigned long>(backoff_ms));
+                }
+                store_set_wifi_connecting(store, false);
+                store_set_wifi_state(store, ConnState::ConnectionError);
             } else {
                 store_set_wifi_connecting(store, true);
                 store_set_wifi_state(store, ConnState::Initializing);
@@ -581,6 +620,14 @@ bool wifi_reconnect() {
 void wifi_poll() {
     if (!g_wifi.store) {
         return;
+    }
+
+    if (g_wifi.restart_requested) {
+        g_wifi_auto_restart_count++;
+        ESP_LOGE(TAG, "Wi-Fi unrecoverable after resets and backoff; restarting device (%lu/%lu)",
+                 static_cast<unsigned long>(g_wifi_auto_restart_count), static_cast<unsigned long>(WIFI_MAX_AUTO_RESTARTS));
+        delay(100);
+        esp_restart();
     }
 
     if (!g_wifi.boot_settings_fallback_shown) {
