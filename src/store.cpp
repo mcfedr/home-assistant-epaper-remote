@@ -655,6 +655,38 @@ bool store_go_home(EntityStore* store) {
     return true;
 }
 
+bool store_wake_from_standby(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+
+    // Wake straight into the room the device is in when Bermuda knows it;
+    // the back button still walks up to the room and floor pickers.
+    int8_t room_idx = store->device_room_idx;
+    int8_t floor_idx = -1;
+    if (room_idx >= 0 && room_idx < static_cast<int8_t>(store->room_count)) {
+        floor_idx = store->rooms[room_idx].floor_idx;
+    } else {
+        room_idx = -1;
+    }
+
+    store->selected_floor = floor_idx;
+    store->selected_room = room_idx;
+    store->floor_list_page = 0;
+    store->room_list_page = 0;
+    store->room_controls_page = 0;
+    store->settings_mode = SettingsMode::None;
+    if (store->standby_active) {
+        store->standby_active = false;
+        store->standby_data_dirty = false;
+        store->standby_revision++;
+    }
+    store->rooms_revision++;
+    store->settings_revision++;
+    xSemaphoreGive(store->mutex);
+
+    notify_ui(store);
+    return true;
+}
+
 bool store_shift_floor_list_page(EntityStore* store, int8_t delta) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
 

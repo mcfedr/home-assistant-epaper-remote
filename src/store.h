@@ -265,6 +265,7 @@ int8_t store_add_entity_to_room(EntityStore* store, uint8_t room_idx, EntityConf
 bool store_select_floor(EntityStore* store, int8_t floor_idx);
 bool store_select_room(EntityStore* store, int8_t room_idx);
 bool store_go_home(EntityStore* store);
+bool store_wake_from_standby(EntityStore* store);
 bool store_shift_floor_list_page(EntityStore* store, int8_t delta);
 bool store_shift_room_list_page(EntityStore* store, int8_t delta);
 bool store_shift_room_controls_page(EntityStore* store, int8_t delta);

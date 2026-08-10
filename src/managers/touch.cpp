@@ -500,7 +500,7 @@ void touch_task(void* arg) {
                     active_widget = -1;
                     continue;
                 }
-                store_go_home(store);
+                store_wake_from_standby(store);
                 touching = false;
                 active_widget = -1;
                 continue;
