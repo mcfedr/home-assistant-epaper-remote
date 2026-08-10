@@ -21,6 +21,21 @@ static const char* const TEXT_HASS_DISCONNECTED[] = {"Not connected", "to Home A
 static const char* const TEXT_HASS_INVALID_KEY[] = {"Cannot connect", "to Home Assistant:", "invalid token", nullptr};
 static const char* const TEXT_GENERIC_ERROR[] = {"Unknown error", nullptr};
 
+// Gray shades exist only in 4bpp; in the 1bpp partial-update plane those values
+// render black. All page-level drawing takes its colors from these helpers so a
+// screen drawn into both planes cannot pick up the wrong constants.
+static uint8_t ui_white(FASTEPD* epaper) {
+    return epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xf;
+}
+
+static uint8_t ui_band(FASTEPD* epaper) { // header bands, badges, selected fills
+    return epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xe;
+}
+
+static uint8_t ui_faint(FASTEPD* epaper) { // subtle inner outlines
+    return epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xd;
+}
+
 static const char* strip_mdi_prefix(const char* icon_name) {
     if (!icon_name) {
         return nullptr;
@@ -139,14 +154,14 @@ static void ui_draw_connection_recovery_buttons(FASTEPD* epaper) {
 
     // Retry button (filled)
     epaper->fillRoundRect(WIFI_DISC_RETRY_X, WIFI_DISC_BUTTON_Y, WIFI_DISC_RETRY_W, WIFI_DISC_BUTTON_H, 12, BBEP_BLACK);
-    epaper->setTextColor(0xf);
+    epaper->setTextColor(ui_white(epaper));
     const char* retry_label = "Retry";
     epaper->getStringBox(retry_label, &rect);
     draw_text_at(epaper, WIFI_DISC_RETRY_X + (WIFI_DISC_RETRY_W - rect.w) / 2,
                  WIFI_DISC_BUTTON_Y + (WIFI_DISC_BUTTON_H - rect.h) / 2, retry_label);
 
     // Wi-Fi Settings button (outlined)
-    epaper->fillRoundRect(WIFI_DISC_SETTINGS_X, WIFI_DISC_BUTTON_Y, WIFI_DISC_SETTINGS_W, WIFI_DISC_BUTTON_H, 12, 0xf);
+    epaper->fillRoundRect(WIFI_DISC_SETTINGS_X, WIFI_DISC_BUTTON_Y, WIFI_DISC_SETTINGS_W, WIFI_DISC_BUTTON_H, 12, ui_white(epaper));
     epaper->drawRoundRect(WIFI_DISC_SETTINGS_X, WIFI_DISC_BUTTON_Y, WIFI_DISC_SETTINGS_W, WIFI_DISC_BUTTON_H, 12, BBEP_BLACK);
     epaper->setTextColor(BBEP_BLACK);
     const char* settings_label = "Wi-Fi Settings";
@@ -455,9 +470,7 @@ static void ui_draw_settings_icon(FASTEPD* epaper, int16_t center_x, int16_t cen
 }
 
 static void ui_draw_back_button(FASTEPD* epaper) {
-    // BBEP_WHITE is the 1bpp constant (1); in 4bpp mode that value is nearly black
-    const uint8_t white = epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xf;
-    epaper->fillRoundRect(ROOM_CONTROLS_BACK_X, ROOM_CONTROLS_BACK_Y, ROOM_CONTROLS_BACK_W, ROOM_CONTROLS_BACK_H, 14, white);
+    epaper->fillRoundRect(ROOM_CONTROLS_BACK_X, ROOM_CONTROLS_BACK_Y, ROOM_CONTROLS_BACK_W, ROOM_CONTROLS_BACK_H, 14, ui_white(epaper));
     epaper->drawRoundRect(ROOM_CONTROLS_BACK_X, ROOM_CONTROLS_BACK_Y, ROOM_CONTROLS_BACK_W, ROOM_CONTROLS_BACK_H, 14, BBEP_BLACK);
     ui_draw_back_icon(epaper);
 }
@@ -472,9 +485,9 @@ static void ui_draw_floor_list_header(FASTEPD* epaper) {
     const int16_t icon_y = header_y + (header_h - icon_size) / 2;
     const int16_t text_x = icon_x + icon_size + 20;
 
-    epaper->fillRoundRect(header_x, header_y, header_w, header_h, 20, 0xe);
+    epaper->fillRoundRect(header_x, header_y, header_w, header_h, 20, ui_band(epaper));
     epaper->drawRoundRect(header_x, header_y, header_w, header_h, 20, BBEP_BLACK);
-    epaper->loadBMP(home_outline, icon_x, icon_y, 0xe, BBEP_BLACK);
+    epaper->loadBMP(home_outline, icon_x, icon_y, ui_band(epaper), BBEP_BLACK);
 
     epaper->setFont(Montserrat_Regular_26);
     draw_text_at(epaper, text_x, header_y + 46, "Home");
@@ -482,7 +495,7 @@ static void ui_draw_floor_list_header(FASTEPD* epaper) {
     epaper->setFont(Montserrat_Regular_16);
     draw_text_at(epaper, text_x, header_y + 72, "Choose a floor", true);
 
-    epaper->fillRoundRect(HOME_SETTINGS_BUTTON_X, HOME_SETTINGS_BUTTON_Y, HOME_SETTINGS_BUTTON_W, HOME_SETTINGS_BUTTON_H, 14, 0xf);
+    epaper->fillRoundRect(HOME_SETTINGS_BUTTON_X, HOME_SETTINGS_BUTTON_Y, HOME_SETTINGS_BUTTON_W, HOME_SETTINGS_BUTTON_H, 14, ui_white(epaper));
     epaper->drawRoundRect(HOME_SETTINGS_BUTTON_X, HOME_SETTINGS_BUTTON_Y, HOME_SETTINGS_BUTTON_W, HOME_SETTINGS_BUTTON_H, 14, BBEP_BLACK);
     ui_draw_settings_icon(epaper, HOME_SETTINGS_BUTTON_X + HOME_SETTINGS_BUTTON_W / 2, HOME_SETTINGS_BUTTON_Y + HOME_SETTINGS_BUTTON_H / 2,
                           HOME_SETTINGS_ICON_SIZE);
@@ -531,7 +544,7 @@ static void ui_draw_location_pin(FASTEPD* epaper, int16_t cx, int16_t cy) {
         const int16_t half_w = static_cast<int16_t>((14 - i) * (r - 2) / 14);
         epaper->drawLine(cx - half_w, cy + 4 + i, cx + half_w, cy + 4 + i, BBEP_BLACK);
     }
-    epaper->fillCircle(cx, cy, 4, 0xf);
+    epaper->fillCircle(cx, cy, 4, ui_white(epaper));
 }
 
 static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_LEN], const char icons[][MAX_ICON_NAME_LEN], uint8_t item_count,
@@ -555,10 +568,10 @@ static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_
         const int16_t tile_x = ROOM_LIST_GRID_MARGIN_X + col * (tile_w + ROOM_LIST_GRID_GAP_X);
         const int16_t tile_y = grid_start_y + row * (tile_h + ROOM_LIST_GRID_GAP_Y);
 
-        epaper->fillRoundRect(tile_x, tile_y, tile_w, tile_h, ROOM_LIST_TILE_RADIUS, 0xf);
+        epaper->fillRoundRect(tile_x, tile_y, tile_w, tile_h, ROOM_LIST_TILE_RADIUS, ui_white(epaper));
         epaper->drawRoundRect(tile_x, tile_y, tile_w, tile_h, ROOM_LIST_TILE_RADIUS, BBEP_BLACK);
         if (tile_w > 10 && tile_h > 10) {
-            epaper->drawRoundRect(tile_x + 3, tile_y + 3, tile_w - 6, tile_h - 6, ROOM_LIST_TILE_RADIUS - 4, 0xd);
+            epaper->drawRoundRect(tile_x + 3, tile_y + 3, tile_w - 6, tile_h - 6, ROOM_LIST_TILE_RADIUS - 4, ui_faint(epaper));
         }
 
         // The icon, gap and label are centered in the tile as a single group
@@ -574,7 +587,7 @@ static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_
         const int16_t group_h = (has_icon ? icon_block : 0) + label.total_h;
         const int16_t group_top = tile_y + (tile_h - group_h) / 2 - 2;
         if (has_icon) {
-            epaper->loadBMP(icon, tile_x + (tile_w - ROOM_LIST_TILE_ICON_SIZE) / 2, group_top, 0xf, BBEP_BLACK);
+            epaper->loadBMP(icon, tile_x + (tile_w - ROOM_LIST_TILE_ICON_SIZE) / 2, group_top, ui_white(epaper), BBEP_BLACK);
         }
         ui_draw_room_tile_label(epaper, &label, tile_x, tile_w, group_top + (has_icon ? icon_block : 0));
 
@@ -593,7 +606,7 @@ static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_
         const int16_t label_x = DISPLAY_WIDTH - ROOM_LIST_GRID_MARGIN_X - label_width;
         const int16_t label_y = ROOM_LIST_FOOTER_Y - 22;
 
-        epaper->fillRoundRect(label_x, label_y, label_width, 32, 12, 0xe);
+        epaper->fillRoundRect(label_x, label_y, label_width, 32, 12, ui_band(epaper));
         epaper->drawRoundRect(label_x, label_y, label_width, 32, 12, BBEP_BLACK);
         draw_text_at(epaper, label_x + 12, ROOM_LIST_FOOTER_Y, page_text, true);
     }
@@ -614,7 +627,7 @@ void ui_draw_floor_list(FASTEPD* epaper, const FloorListSnapshot* snapshot, uint
 }
 
 void ui_draw_room_list_header(FASTEPD* epaper, const char* floor_name) {
-    epaper->fillRect(0, 0, DISPLAY_WIDTH, ROOM_LIST_HEADER_HEIGHT, 0xe);
+    epaper->fillRect(0, 0, DISPLAY_WIDTH, ROOM_LIST_HEADER_HEIGHT, ui_band(epaper));
     ui_draw_back_button(epaper);
 
     epaper->setFont(Montserrat_Regular_20);
@@ -672,7 +685,7 @@ static uint8_t ui_rssi_quality(int16_t rssi) {
 }
 
 static void ui_draw_settings_header(FASTEPD* epaper, const char* title) {
-    epaper->fillRect(0, 0, DISPLAY_WIDTH, SETTINGS_HEADER_HEIGHT, 0xe);
+    epaper->fillRect(0, 0, DISPLAY_WIDTH, SETTINGS_HEADER_HEIGHT, ui_band(epaper));
     ui_draw_back_button(epaper);
     epaper->setFont(Montserrat_Regular_20);
     draw_text_at(epaper, ROOM_CONTROLS_BACK_X + ROOM_CONTROLS_BACK_W + 32, ROOM_CONTROLS_BACK_Y + 36, title);
@@ -683,7 +696,7 @@ void ui_draw_settings_menu(FASTEPD* epaper) {
     epaper->setTextColor(BBEP_BLACK);
     ui_draw_settings_header(epaper, "Settings");
 
-    epaper->fillRoundRect(SETTINGS_TILE_X, SETTINGS_TILE_Y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, 0xf);
+    epaper->fillRoundRect(SETTINGS_TILE_X, SETTINGS_TILE_Y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, ui_white(epaper));
     epaper->drawRoundRect(SETTINGS_TILE_X, SETTINGS_TILE_Y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, BBEP_BLACK);
 
     epaper->setFont(Montserrat_Regular_20);
@@ -691,7 +704,7 @@ void ui_draw_settings_menu(FASTEPD* epaper) {
     epaper->setFont(Montserrat_Regular_16);
     draw_text_at(epaper, SETTINGS_TILE_X + 24, SETTINGS_TILE_Y + 102, "Network settings and diagnostics");
 
-    epaper->fillRoundRect(SETTINGS_STANDBY_TILE_X, SETTINGS_STANDBY_TILE_Y, SETTINGS_STANDBY_TILE_W, SETTINGS_STANDBY_TILE_H, 20, 0xf);
+    epaper->fillRoundRect(SETTINGS_STANDBY_TILE_X, SETTINGS_STANDBY_TILE_Y, SETTINGS_STANDBY_TILE_W, SETTINGS_STANDBY_TILE_H, 20, ui_white(epaper));
     epaper->drawRoundRect(SETTINGS_STANDBY_TILE_X, SETTINGS_STANDBY_TILE_Y, SETTINGS_STANDBY_TILE_W, SETTINGS_STANDBY_TILE_H, 20, BBEP_BLACK);
 
     epaper->setFont(Montserrat_Regular_20);
@@ -701,7 +714,7 @@ void ui_draw_settings_menu(FASTEPD* epaper) {
 }
 
 static void ui_draw_wifi_network_row(FASTEPD* epaper, int16_t x, int16_t y, int16_t w, const WifiNetwork& network, bool connected) {
-    epaper->fillRoundRect(x, y, w, WIFI_NETWORK_ROW_H, 12, (connected || network.known) ? 0xe : 0xf);
+    epaper->fillRoundRect(x, y, w, WIFI_NETWORK_ROW_H, 12, (connected || network.known) ? ui_band(epaper) : ui_white(epaper));
     epaper->drawRoundRect(x, y, w, WIFI_NETWORK_ROW_H, 12, BBEP_BLACK);
 
     epaper->setFont(Montserrat_Regular_16);
@@ -731,7 +744,7 @@ void ui_draw_wifi_settings(FASTEPD* epaper, const WifiSettingsSnapshot* snapshot
     epaper->setTextColor(BBEP_BLACK);
     ui_draw_settings_header(epaper, "Wi-Fi");
 
-    epaper->fillRoundRect(WIFI_INFO_X, WIFI_INFO_Y, WIFI_INFO_W, WIFI_INFO_H, 14, 0xf);
+    epaper->fillRoundRect(WIFI_INFO_X, WIFI_INFO_Y, WIFI_INFO_W, WIFI_INFO_H, 14, ui_white(epaper));
     epaper->drawRoundRect(WIFI_INFO_X, WIFI_INFO_Y, WIFI_INFO_W, WIFI_INFO_H, 14, BBEP_BLACK);
 
     epaper->setFont(Montserrat_Regular_20);
@@ -766,7 +779,7 @@ void ui_draw_wifi_settings(FASTEPD* epaper, const WifiSettingsSnapshot* snapshot
         draw_text_at(epaper, WIFI_INFO_X + 14, WIFI_INFO_Y + 164, snapshot->connect_error);
     }
 
-    epaper->fillRoundRect(WIFI_SCAN_BUTTON_X, WIFI_SCAN_BUTTON_Y, WIFI_SCAN_BUTTON_W, WIFI_SCAN_BUTTON_H, 10, 0xf);
+    epaper->fillRoundRect(WIFI_SCAN_BUTTON_X, WIFI_SCAN_BUTTON_Y, WIFI_SCAN_BUTTON_W, WIFI_SCAN_BUTTON_H, 10, ui_white(epaper));
     epaper->drawRoundRect(WIFI_SCAN_BUTTON_X, WIFI_SCAN_BUTTON_Y, WIFI_SCAN_BUTTON_W, WIFI_SCAN_BUTTON_H, 10, BBEP_BLACK);
     epaper->setFont(Montserrat_Regular_16);
     BB_RECT scan_rect = get_text_box(epaper, "Scan");
@@ -775,7 +788,7 @@ void ui_draw_wifi_settings(FASTEPD* epaper, const WifiSettingsSnapshot* snapshot
 
     const char* default_label = snapshot->custom_profile_active ? "Use Default" : "On Default";
     epaper->fillRoundRect(WIFI_DEFAULT_BUTTON_X, WIFI_DEFAULT_BUTTON_Y, WIFI_DEFAULT_BUTTON_W, WIFI_DEFAULT_BUTTON_H, 10,
-                          snapshot->custom_profile_active ? 0xf : 0xe);
+                          snapshot->custom_profile_active ? ui_white(epaper) : ui_band(epaper));
     epaper->drawRoundRect(WIFI_DEFAULT_BUTTON_X, WIFI_DEFAULT_BUTTON_Y, WIFI_DEFAULT_BUTTON_W, WIFI_DEFAULT_BUTTON_H, 10, BBEP_BLACK);
     BB_RECT default_rect = get_text_box(epaper, default_label);
     draw_text_at(epaper, WIFI_DEFAULT_BUTTON_X + (WIFI_DEFAULT_BUTTON_W - default_rect.w) / 2,
@@ -805,14 +818,14 @@ void ui_draw_wifi_settings(FASTEPD* epaper, const WifiSettingsSnapshot* snapshot
         BB_RECT page_rect = get_text_box(epaper, page_text);
         const int16_t badge_w = page_rect.w + 22;
         const int16_t badge_x = DISPLAY_WIDTH - WIFI_INFO_X - badge_w;
-        epaper->fillRoundRect(badge_x, WIFI_NETWORK_PAGE_BADGE_Y - 24, badge_w, 34, 10, 0xf);
+        epaper->fillRoundRect(badge_x, WIFI_NETWORK_PAGE_BADGE_Y - 24, badge_w, 34, 10, ui_white(epaper));
         epaper->drawRoundRect(badge_x, WIFI_NETWORK_PAGE_BADGE_Y - 24, badge_w, 34, 10, BBEP_BLACK);
         draw_text_at(epaper, badge_x + 11, WIFI_NETWORK_PAGE_BADGE_Y, page_text);
     }
 }
 
 static void ui_draw_key(FASTEPD* epaper, int16_t x, int16_t y, int16_t w, int16_t h, const char* label, bool active = false) {
-    epaper->fillRoundRect(x, y, w, h, 8, active ? 0xe : 0xf);
+    epaper->fillRoundRect(x, y, w, h, 8, active ? ui_band(epaper) : ui_white(epaper));
     epaper->drawRoundRect(x, y, w, h, 8, BBEP_BLACK);
     BB_RECT text_rect = get_text_box(epaper, label);
     draw_text_at(epaper, x + (w - text_rect.w) / 2, y + (h + text_rect.h) / 2 - 1, label);
@@ -823,7 +836,7 @@ void ui_draw_wifi_password(FASTEPD* epaper, const WifiPasswordSnapshot* snapshot
     ui_draw_settings_header(epaper, "Wi-Fi Password");
     epaper->setFont(Montserrat_Regular_16);
 
-    epaper->fillRoundRect(WIFI_PASSWORD_BOX_X, WIFI_PASSWORD_BOX_Y, WIFI_PASSWORD_BOX_W, WIFI_PASSWORD_BOX_H, 14, 0xf);
+    epaper->fillRoundRect(WIFI_PASSWORD_BOX_X, WIFI_PASSWORD_BOX_Y, WIFI_PASSWORD_BOX_W, WIFI_PASSWORD_BOX_H, 14, ui_white(epaper));
     epaper->drawRoundRect(WIFI_PASSWORD_BOX_X, WIFI_PASSWORD_BOX_Y, WIFI_PASSWORD_BOX_W, WIFI_PASSWORD_BOX_H, 14, BBEP_BLACK);
 
     char ssid_line[96];
@@ -1060,26 +1073,26 @@ static void ui_draw_energy_node(FASTEPD* epaper,
                                 int16_t radius,
                                 const uint8_t* icon) {
     epaper->fillCircle(center_x, center_y, radius, BBEP_BLACK);
-    epaper->fillCircle(center_x, center_y, radius - 3, 0xf);
+    epaper->fillCircle(center_x, center_y, radius - 3, ui_white(epaper));
 
     if (icon) {
-        epaper->loadBMP(icon, center_x - 32, center_y - 32, 0xf, BBEP_BLACK);
+        epaper->loadBMP(icon, center_x - 32, center_y - 32, ui_white(epaper), BBEP_BLACK);
     }
 }
 
 void ui_draw_standby(FASTEPD* epaper, const StandbySnapshot* snapshot) {
     epaper->setTextColor(BBEP_BLACK);
-    epaper->fillScreen(0xf);
+    epaper->fillScreen(ui_white(epaper));
 
     const int16_t card_x = STANDBY_MARGIN;
     const int16_t card_w = DISPLAY_WIDTH - 2 * STANDBY_MARGIN;
 
     // Weather card
-    epaper->fillRoundRect(card_x, STANDBY_WEATHER_Y, card_w, STANDBY_WEATHER_H, 20, 0xf);
+    epaper->fillRoundRect(card_x, STANDBY_WEATHER_Y, card_w, STANDBY_WEATHER_H, 20, ui_white(epaper));
     epaper->drawRoundRect(card_x, STANDBY_WEATHER_Y, card_w, STANDBY_WEATHER_H, 20, BBEP_BLACK);
 
     const uint8_t* weather_icon = ui_weather_icon_for_condition(snapshot->weather_condition);
-    epaper->loadBMP(weather_icon, card_x + 20, STANDBY_WEATHER_Y + 48, 0xf, BBEP_BLACK);
+    epaper->loadBMP(weather_icon, card_x + 20, STANDBY_WEATHER_Y + 48, ui_white(epaper), BBEP_BLACK);
 
     char now_temp[20];
     char hi_temp[20];
@@ -1134,7 +1147,7 @@ void ui_draw_standby(FASTEPD* epaper, const StandbySnapshot* snapshot) {
         ui_draw_centered_text(epaper, slot_center_x, forecast_row_y + 26, day_label, true);
 
         const uint8_t* day_icon = ui_weather_icon_for_condition(day ? day->condition : "");
-        epaper->loadBMP(day_icon, slot_center_x - 32, forecast_row_y + 40, 0xf, BBEP_BLACK);
+        epaper->loadBMP(day_icon, slot_center_x - 32, forecast_row_y + 40, ui_white(epaper), BBEP_BLACK);
 
         // Whole degrees: the 5-column slots are too narrow for decimals at this font size
         char day_high[16];
@@ -1418,10 +1431,7 @@ void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, uint8_
     epaper->setFont(Montserrat_Regular_20);
     epaper->setTextColor(BBEP_BLACK);
 
-    // In the 1bpp partial-update plane there is no gray; use white so partial
-    // refreshes that clip the header don't paint black bars
-    const uint8_t band = epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xe;
-    epaper->fillRect(0, 0, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, band);
+    epaper->fillRect(0, 0, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, ui_band(epaper));
     if (epaper->getMode() == BB_MODE_1BPP) {
         epaper->drawLine(0, ROOM_CONTROLS_HEADER_HEIGHT - 1, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT - 1, BBEP_BLACK);
     }
@@ -1446,9 +1456,7 @@ void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, uint8_
         const int16_t badge_x = DISPLAY_WIDTH - ROOM_CONTROLS_ITEM_X - badge_w;
         const int16_t badge_y = (ROOM_CONTROLS_HEADER_HEIGHT - badge_h) / 2;
 
-        // This header also renders into the 1bpp partial-update plane, where 0xe is black
-        const uint8_t badge_fill = epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xe;
-        epaper->fillRoundRect(badge_x, badge_y, badge_w, badge_h, 10, badge_fill);
+        epaper->fillRoundRect(badge_x, badge_y, badge_w, badge_h, 10, ui_band(epaper));
         epaper->drawRoundRect(badge_x, badge_y, badge_w, badge_h, 10, BBEP_BLACK);
         draw_text_at(epaper, badge_x + 12, badge_y + 22, page_text, true);
     }
@@ -1524,14 +1532,14 @@ void ui_task(void* arg) {
                 display_is_dirty = false;
             } else if (current_state.mode == UiMode::SettingsMenu && (mode_changed || settings_changed)) {
                 ctx->epaper->setMode(BB_MODE_4BPP);
-                ctx->epaper->fillScreen(0xf);
+                ctx->epaper->fillScreen(ui_white(ctx->epaper));
                 ui_draw_settings_menu(ctx->epaper);
                 ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 display_is_dirty = false;
             } else if (current_state.mode == UiMode::WifiSettings && (mode_changed || settings_changed)) {
                 store_get_wifi_settings_snapshot(ctx->store, &wifi_settings_snapshot);
                 ctx->epaper->setMode(BB_MODE_4BPP);
-                ctx->epaper->fillScreen(0xf);
+                ctx->epaper->fillScreen(ui_white(ctx->epaper));
                 ui_draw_wifi_settings(ctx->epaper, &wifi_settings_snapshot);
                 ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 display_is_dirty = false;
@@ -1539,12 +1547,12 @@ void ui_task(void* arg) {
                 if (!store_get_wifi_password_snapshot(ctx->store, &wifi_password_snapshot)) {
                     current_state.mode = UiMode::GenericError;
                     ctx->epaper->setMode(BB_MODE_4BPP);
-                    ctx->epaper->fillScreen(0xf);
+                    ctx->epaper->fillScreen(ui_white(ctx->epaper));
                     ui_show_message(current_state.mode, ctx->epaper);
                     ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 } else {
                     ctx->epaper->setMode(BB_MODE_4BPP);
-                    ctx->epaper->fillScreen(0xf);
+                    ctx->epaper->fillScreen(ui_white(ctx->epaper));
                     ui_draw_wifi_password(ctx->epaper, &wifi_password_snapshot);
                     ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 }
@@ -1553,7 +1561,7 @@ void ui_task(void* arg) {
                 store_get_floor_list_snapshot(ctx->store, &floor_list_snapshot);
 
                 ctx->epaper->setMode(BB_MODE_4BPP);
-                ctx->epaper->fillScreen(0xf);
+                ctx->epaper->fillScreen(ui_white(ctx->epaper));
                 ui_draw_floor_list(ctx->epaper, &floor_list_snapshot, current_state.floor_list_page);
                 ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 display_is_dirty = false;
@@ -1561,13 +1569,13 @@ void ui_task(void* arg) {
                 if (!store_get_room_list_snapshot(ctx->store, current_state.selected_floor, &room_list_snapshot)) {
                     current_state.mode = UiMode::GenericError;
                     ctx->epaper->setMode(BB_MODE_4BPP);
-                    ctx->epaper->fillScreen(0xf);
+                    ctx->epaper->fillScreen(ui_white(ctx->epaper));
                     ui_show_message(current_state.mode, ctx->epaper);
                     ctx->epaper->fullUpdate(CLEAR_FAST, true);
                     display_is_dirty = false;
                 } else {
                     ctx->epaper->setMode(BB_MODE_4BPP);
-                    ctx->epaper->fillScreen(0xf);
+                    ctx->epaper->fillScreen(ui_white(ctx->epaper));
                     ui_draw_room_list(ctx->epaper, &room_list_snapshot, current_state.room_list_page);
                     ctx->epaper->fullUpdate(CLEAR_FAST, true);
                     display_is_dirty = false;
@@ -1575,14 +1583,14 @@ void ui_task(void* arg) {
             } else if (current_state.mode == UiMode::RoomControls &&
                        (mode_changed || room_changed || room_controls_page_changed || rooms_changed)) {
                 ctx->epaper->setMode(BB_MODE_4BPP);
-                ctx->epaper->fillScreen(0xf);
+                ctx->epaper->fillScreen(ui_white(ctx->epaper));
                 ui_draw_room_controls_header(ctx->epaper, room_controls_snapshot.room_name, current_state.room_controls_page,
                                              room_controls_page_count, room_controls_truncated);
                 ui_room_controls_draw_widgets(&current_state, BitDepth::BD_4BPP, ctx->screen, ctx->epaper);
                 ctx->epaper->fullUpdate(CLEAR_FAST, true);
 
                 ctx->epaper->setMode(BB_MODE_1BPP);
-                ctx->epaper->fillScreen(BBEP_WHITE);
+                ctx->epaper->fillScreen(ui_white(ctx->epaper));
                 ui_draw_room_controls_header(ctx->epaper, room_controls_snapshot.room_name, current_state.room_controls_page,
                                              room_controls_page_count, room_controls_truncated);
                 ui_room_controls_draw_widgets(&current_state, BitDepth::BD_1BPP, ctx->screen, ctx->epaper);
@@ -1611,7 +1619,7 @@ void ui_task(void* arg) {
                 }
             } else if (mode_changed) {
                 ctx->epaper->setMode(BB_MODE_4BPP);
-                ctx->epaper->fillScreen(0xf);
+                ctx->epaper->fillScreen(ui_white(ctx->epaper));
                 ui_show_message(current_state.mode, ctx->epaper);
                 ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 display_is_dirty = false;
@@ -1625,14 +1633,14 @@ void ui_task(void* arg) {
 
             xSemaphoreTake(ctx->store->epaper_mutex, portMAX_DELAY);
             ctx->epaper->setMode(BB_MODE_4BPP);
-            ctx->epaper->fillScreen(0xf);
+            ctx->epaper->fillScreen(ui_white(ctx->epaper));
             ui_draw_room_controls_header(ctx->epaper, room_controls_snapshot.room_name, displayed_state.room_controls_page,
                                          room_controls_page_count, room_controls_truncated);
             ui_room_controls_draw_widgets(&displayed_state, BitDepth::BD_4BPP, ctx->screen, ctx->epaper);
             ctx->epaper->fullUpdate(CLEAR_FAST, true);
 
             ctx->epaper->setMode(BB_MODE_1BPP);
-            ctx->epaper->fillScreen(BBEP_WHITE);
+            ctx->epaper->fillScreen(ui_white(ctx->epaper));
             ui_draw_room_controls_header(ctx->epaper, room_controls_snapshot.room_name, displayed_state.room_controls_page,
                                          room_controls_page_count, room_controls_truncated);
             ui_room_controls_draw_widgets(&displayed_state, BitDepth::BD_1BPP, ctx->screen, ctx->epaper);
