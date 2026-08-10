@@ -28,7 +28,8 @@ def test_cover_from_device(at_home, ha, cfg):
     moving_or_moved = {"closing", "opening", "closed" if original == "open" else "open"}
     try:
         at_home.tap(*down)
-        ha.wait_for_state(cfg.cover_entity, moving_or_moved, timeout=15)
+        # The blind group reports lazily, notably slower under suite load
+        ha.wait_for_state(cfg.cover_entity, moving_or_moved, timeout=40)
 
         # Stop mid-travel and verify the cover settles without completing
         import time
