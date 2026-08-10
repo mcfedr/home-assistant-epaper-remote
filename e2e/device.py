@@ -21,11 +21,10 @@ class DeviceClient:
         resp.raise_for_status()
         return resp.json()
 
-    def tap(self, x: int, y: int, hold_ms: int | None = None) -> None:
-        body: dict[str, Any] = {"x": x, "y": y}
-        if hold_ms is not None:
-            body["hold_ms"] = hold_ms
-        resp = self.session.post(f"{self.base_url}/tap", json=body, timeout=self.timeout)
+    def tap(self, x: int, y: int, hold_ms: int = 150) -> None:
+        # 60ms holds are consumed but occasionally race the touch task's idle
+        # poll and mode transitions; 150ms lands reliably
+        resp = self.session.post(f"{self.base_url}/tap", json={"x": x, "y": y, "hold_ms": hold_ms}, timeout=self.timeout)
         resp.raise_for_status()
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int | None = None) -> None:
