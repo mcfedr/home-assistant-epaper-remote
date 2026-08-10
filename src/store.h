@@ -66,12 +66,14 @@ struct Floor {
 
 struct FloorListSnapshot {
     uint8_t floor_count;
+    int8_t device_floor_idx; // floor containing the device's room (-1 unknown)
     char floor_names[MAX_FLOORS][MAX_FLOOR_NAME_LEN];
     char floor_icons[MAX_FLOORS][MAX_ICON_NAME_LEN];
 };
 
 struct RoomListSnapshot {
     uint8_t room_count;
+    int8_t device_room_list_idx; // position of the device's room in this list (-1 absent)
     int8_t room_indices[MAX_ROOMS];
     char floor_name[MAX_FLOOR_NAME_LEN];
     char room_names[MAX_ROOMS][MAX_ROOM_NAME_LEN];

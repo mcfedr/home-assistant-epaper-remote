@@ -523,8 +523,20 @@ static ListGridLayout list_grid_layout(uint8_t item_count, uint8_t page_count, b
     return layout;
 }
 
+// Map-pin marking the tile of the room/floor the device is physically in
+static void ui_draw_location_pin(FASTEPD* epaper, int16_t cx, int16_t cy) {
+    constexpr int16_t r = 9;
+    epaper->fillCircle(cx, cy, r, BBEP_BLACK);
+    for (int16_t i = 0; i <= 14; i++) { // tapering tail down to the point
+        const int16_t half_w = static_cast<int16_t>((14 - i) * (r - 2) / 14);
+        epaper->drawLine(cx - half_w, cy + 4 + i, cx + half_w, cy + 4 + i, BBEP_BLACK);
+    }
+    epaper->fillCircle(cx, cy, 4, 0xf);
+}
+
 static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_LEN], const char icons[][MAX_ICON_NAME_LEN], uint8_t item_count,
-                              uint8_t list_page, uint16_t grid_start_y, bool expand_single_page_layout = false) {
+                              uint8_t list_page, uint16_t grid_start_y, bool expand_single_page_layout = false,
+                              int16_t device_item_idx = -1) {
     const uint8_t total_pages = list_page_count(item_count);
     const uint8_t page = std::min(list_page, static_cast<uint8_t>(total_pages - 1));
     const ListGridLayout layout = list_grid_layout(item_count, total_pages, expand_single_page_layout);
@@ -565,6 +577,10 @@ static void ui_draw_name_grid(FASTEPD* epaper, const char names[][MAX_ROOM_NAME_
             epaper->loadBMP(icon, tile_x + (tile_w - ROOM_LIST_TILE_ICON_SIZE) / 2, group_top, 0xf, BBEP_BLACK);
         }
         ui_draw_room_tile_label(epaper, &label, tile_x, tile_w, group_top + (has_icon ? icon_block : 0));
+
+        if (static_cast<int16_t>(idx) == device_item_idx) {
+            ui_draw_location_pin(epaper, tile_x + tile_w - 28, tile_y + 26);
+        }
     }
 
     if (total_pages > 1) {
@@ -593,7 +609,8 @@ void ui_draw_floor_list(FASTEPD* epaper, const FloorListSnapshot* snapshot, uint
         return;
     }
 
-    ui_draw_name_grid(epaper, snapshot->floor_names, snapshot->floor_icons, snapshot->floor_count, floor_list_page, FLOOR_LIST_GRID_START_Y, true);
+    ui_draw_name_grid(epaper, snapshot->floor_names, snapshot->floor_icons, snapshot->floor_count, floor_list_page, FLOOR_LIST_GRID_START_Y, true,
+                      snapshot->device_floor_idx);
 }
 
 void ui_draw_room_list_header(FASTEPD* epaper, const char* floor_name) {
@@ -623,7 +640,8 @@ void ui_draw_room_list(FASTEPD* epaper, const RoomListSnapshot* snapshot, uint8_
         return;
     }
 
-    ui_draw_name_grid(epaper, snapshot->room_names, snapshot->room_icons, snapshot->room_count, room_list_page, ROOM_LIST_GRID_START_Y, false);
+    ui_draw_name_grid(epaper, snapshot->room_names, snapshot->room_icons, snapshot->room_count, room_list_page, ROOM_LIST_GRID_START_Y, false,
+                      snapshot->device_room_list_idx);
 }
 
 static const char* ui_wifi_state_label(ConnState state, bool connecting) {

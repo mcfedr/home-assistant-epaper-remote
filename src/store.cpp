@@ -745,6 +745,10 @@ void store_get_floor_list_snapshot(EntityStore* store, FloorListSnapshot* snapsh
     memset(snapshot, 0, sizeof(FloorListSnapshot));
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     snapshot->floor_count = store->floor_count;
+    snapshot->device_floor_idx = -1;
+    if (store->device_room_idx >= 0 && store->device_room_idx < static_cast<int8_t>(store->room_count)) {
+        snapshot->device_floor_idx = store->rooms[store->device_room_idx].floor_idx;
+    }
     for (uint8_t floor_idx = 0; floor_idx < store->floor_count; floor_idx++) {
         copy_string(snapshot->floor_names[floor_idx], MAX_FLOOR_NAME_LEN, store->floors[floor_idx].name);
         copy_string(snapshot->floor_icons[floor_idx], MAX_ICON_NAME_LEN, store->floors[floor_idx].icon);
@@ -762,12 +766,16 @@ bool store_get_room_list_snapshot(EntityStore* store, int8_t floor_idx, RoomList
     }
 
     copy_string(snapshot->floor_name, sizeof(snapshot->floor_name), store->floors[floor_idx].name);
+    snapshot->device_room_list_idx = -1;
     for (uint8_t room_idx = 0; room_idx < store->room_count; room_idx++) {
         if (store->rooms[room_idx].floor_idx != floor_idx) {
             continue;
         }
 
         uint8_t snapshot_idx = snapshot->room_count++;
+        if (static_cast<int8_t>(room_idx) == store->device_room_idx) {
+            snapshot->device_room_list_idx = static_cast<int8_t>(snapshot_idx);
+        }
         snapshot->room_indices[snapshot_idx] = static_cast<int8_t>(room_idx);
         copy_string(snapshot->room_names[snapshot_idx], MAX_ROOM_NAME_LEN, store->rooms[room_idx].name);
         copy_string(snapshot->room_icons[snapshot_idx], MAX_ICON_NAME_LEN, store->rooms[room_idx].icon);
