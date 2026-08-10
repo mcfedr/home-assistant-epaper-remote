@@ -56,6 +56,11 @@ constexpr uint8_t DISPLAY_FULL_UPDATE_PASSES = 4;
 constexpr uint32_t STANDBY_IDLE_TIMEOUT_MS = 120000;
 constexpr uint32_t STANDBY_REFRESH_INTERVAL_MS = 3600000; // 1 hour
 
+// BLE beacon for Bermuda room presence
+constexpr const char* BEACON_NAME = "epaper-remote";
+constexpr uint16_t BEACON_ADV_INTERVAL_MIN_MS = 500;
+constexpr uint16_t BEACON_ADV_INTERVAL_MAX_MS = 700;
+
 // Test/debug harness (HTTP server for e2e tests, see e2e/)
 constexpr uint16_t HARNESS_HTTP_PORT = 8080;
 constexpr uint32_t HARNESS_HTTPD_STACK = 8192;

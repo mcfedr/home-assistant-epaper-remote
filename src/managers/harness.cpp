@@ -1,4 +1,5 @@
 #include "managers/harness.h"
+#include "managers/beacon.h"
 #include "boards.h"
 #include "constants.h"
 #include "esp_heap_caps.h"
@@ -167,7 +168,9 @@ static esp_err_t health_get_handler(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "board", BOARD_NAME);
     cJSON_AddNumberToObject(root, "uptime_ms", millis());
     cJSON_AddNumberToObject(root, "heap_free", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(root, "internal_free", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     cJSON_AddNumberToObject(root, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    cJSON_AddStringToObject(root, "beacon", beacon_status());
     cJSON_AddStringToObject(root, "wifi", conn_state_name(info.wifi));
     cJSON_AddStringToObject(root, "home_assistant", conn_state_name(info.home_assistant));
     cJSON_AddStringToObject(root, "ip", info.ip_address);

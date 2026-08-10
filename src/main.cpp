@@ -1,6 +1,8 @@
 #include "boards.h"
 #include "config_remote.h"
 #include "constants.h"
+#include "managers/beacon.h"
+#include "managers/console.h"
 #include "managers/harness.h"
 #include "managers/home_assistant.h"
 #include "managers/touch.h"
@@ -29,6 +31,8 @@ static HomeAssistantTaskArgs hass_task_args;
 static HarnessTaskArgs harness_task_args;
 
 void setup() {
+    console_init();
+
     // Initialize objects
     store_init(&store);
     ui_state_init(&shared_ui_state);
@@ -41,6 +45,11 @@ void setup() {
     epaper.setRotation(90);
     epaper.setPasses(DISPLAY_PARTIAL_UPDATE_PASSES, DISPLAY_FULL_UPDATE_PASSES);
     epaper.einkPower(true); // FIXME: Disabling power makes the GT911 unavailable
+
+    // BLE beacon for Bermuda room presence; must initialize before Wi-Fi connects.
+    // FIXME: disabled — boot-time init currently wedges the board (see hardening notes);
+    // init after Wi-Fi drops the link instead. Needs init-order investigation.
+    // launch_beacon(&store);
 
     // Launch UI task
     ui_task_args.epaper = &epaper;
@@ -71,6 +80,7 @@ void setup() {
     harness_task_args.shared_state = &shared_ui_state;
     launch_harness(&harness_task_args);
 
+
     if (HOME_BUTTON_PIN >= 0) {
         if (HOME_BUTTON_ACTIVE_LOW) {
             pinMode(HOME_BUTTON_PIN, INPUT_PULLUP);
@@ -82,6 +92,7 @@ void setup() {
 
 void loop() {
     wifi_poll();
+    console_poll();
 
     if (HOME_BUTTON_PIN >= 0) {
         static bool was_pressed = false;

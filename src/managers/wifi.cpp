@@ -590,6 +590,25 @@ void wifi_request_scan() {
     g_wifi.scan_requested = true;
 }
 
+void wifi_debug_report(char* out, size_t out_len) {
+    const uint32_t now = millis();
+    const long pause_left =
+        g_wifi.reconnect_pause_until_ms == 0 ? 0 : static_cast<long>(g_wifi.reconnect_pause_until_ms - now);
+    snprintf(out, out_len,
+             "status=%d ssid='%s' profile=%s ip=%s rssi=%d fails=%u auth_fails=%u deep_resets=%u backoffs=%u "
+             "backoff_left_ms=%ld auto_restarts=%lu",
+             static_cast<int>(WiFi.status()), g_wifi.active_ssid, g_wifi.active_custom_profile ? "custom" : "default",
+             WiFi.localIP().toString().c_str(), static_cast<int>(WiFi.RSSI()), g_wifi.consecutive_disconnects,
+             g_wifi.consecutive_auth_fails, g_wifi.deep_resets_since_connect, g_wifi.backoffs_since_connect,
+             pause_left > 0 ? pause_left : 0, static_cast<unsigned long>(g_wifi_auto_restart_count));
+}
+
+void wifi_force_recovery() {
+    g_wifi.reconnect_pause_until_ms = 0;
+    g_wifi.recovery_requested = true;
+    g_wifi.recovery_reason = 0;
+}
+
 bool wifi_connect_to_network(const char* ssid, const char* password) {
     if (!g_wifi.store || !ssid || ssid[0] == '\0') {
         return false;
