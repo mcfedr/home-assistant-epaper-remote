@@ -15,6 +15,9 @@ void configure_remote(Configuration* config, EntityStore* store, Screen* screen)
     config->home_assistant_token = "ey...";
     config->root_ca = ISRG_ROOT_X1; // You probably don't need to update this
 
+    // Bermuda area sensor for this device (see README), e.g. "sensor.epaper_remote_area"
+    config->bermuda_area_entity_id = "";
+
     // Standby screen entities
     config->weather_entity_id = "";
     config->energy_solar_entity_id = "";

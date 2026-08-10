@@ -1516,6 +1516,26 @@ void store_wait_for_wifi_up(EntityStore* store) {
     xEventGroupWaitBits(store->event_group, BIT_WIFI_UP, pdFALSE, pdTRUE, portMAX_DELAY);
 }
 
+void store_set_device_room(EntityStore* store, int8_t room_idx) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool changed = store->device_room_idx != room_idx;
+    store->device_room_idx = room_idx;
+    if (changed) {
+        store->rooms_revision++; // the floor/room lists show a location pin
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+}
+
+int8_t store_get_device_room(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const int8_t room_idx = store->device_room_idx;
+    xSemaphoreGive(store->mutex);
+    return room_idx;
+}
+
 void store_get_harness_info(EntityStore* store, HarnessInfoSnapshot* snapshot) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     snapshot->wifi = store->wifi;

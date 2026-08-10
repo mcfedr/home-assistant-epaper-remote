@@ -45,6 +45,10 @@ typedef struct home_assistant_context {
     int8_t entity_values[MAX_ENTITIES]; // brightness percentage or climate temp steps (-1 unknown)
     TickType_t last_command_sent_at_ms[MAX_ENTITIES];
 
+    // Bermuda device location
+    char device_area_entity_id[MAX_ENTITY_ID_LEN];
+    char device_area_id[MAX_ICON_NAME_LEN]; // last reported HA area_id for the device
+
     // Standby data entity IDs
     char standby_weather_entity_id[MAX_ENTITY_ID_LEN];
     char standby_energy_solar_entity_id[MAX_ENTITY_ID_LEN];
@@ -478,6 +482,7 @@ static void hass_reset_discovery_state(home_assistant_context_t* hass) {
     memset(hass->entity_modes, 0, sizeof(hass->entity_modes));
     memset(hass->entity_values, -1, sizeof(hass->entity_values));
     memset(hass->last_command_sent_at_ms, 0, sizeof(hass->last_command_sent_at_ms));
+    copy_optional_entity_id(hass->device_area_entity_id, sizeof(hass->device_area_entity_id), hass->config->bermuda_area_entity_id);
     copy_optional_entity_id(hass->standby_weather_entity_id, sizeof(hass->standby_weather_entity_id), hass->config->weather_entity_id);
     copy_optional_entity_id(hass->standby_energy_solar_entity_id, sizeof(hass->standby_energy_solar_entity_id),
                             hass->config->energy_solar_entity_id);
@@ -845,6 +850,7 @@ void hass_cmd_subscribe(home_assistant_context_t* hass) {
     for (uint8_t idx = 0; idx < hass->entity_count; idx++) {
         hass_add_standby_entity_id(entity_ids, hass->entity_ids[idx], added_ids, max_added_ids, &added_id_count);
     }
+    hass_add_standby_entity_id(entity_ids, hass->device_area_entity_id, added_ids, max_added_ids, &added_id_count);
     hass_add_standby_entity_id(entity_ids, hass->standby_weather_entity_id, added_ids, max_added_ids, &added_id_count);
     hass_add_standby_series_ids(entity_ids, &hass->standby_solar_series, added_ids, max_added_ids, &added_id_count);
     hass_add_standby_series_ids(entity_ids, &hass->standby_grid_in_series, added_ids, max_added_ids, &added_id_count);
@@ -972,11 +978,42 @@ static void hass_parse_weather_entity_update(home_assistant_context_t* hass, cJS
     store_set_standby_weather(hass->store, condition, has_temperature, temperature_c);
 }
 
+// Map the Bermuda area sensor's reported area onto a known room. Called on
+// sensor updates and again after discovery rebuilds the room list.
+static void hass_update_device_room(home_assistant_context_t* hass) {
+    char area_id[MAX_ICON_NAME_LEN];
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    copy_string(area_id, sizeof(area_id), hass->device_area_id);
+    xSemaphoreGive(hass->mutex);
+
+    int16_t room_idx = area_id[0] != '\0' ? hass_find_room_for_area(hass, area_id) : -1;
+    store_set_device_room(hass->store, room_idx >= 0 ? static_cast<int8_t>(room_idx) : -1);
+}
+
+static void hass_parse_device_area_update(home_assistant_context_t* hass, cJSON* item) {
+    cJSON* attributes = cJSON_GetObjectItem(item, "a");
+    cJSON* area_id_item = cJSON_IsObject(attributes) ? cJSON_GetObjectItem(attributes, "area_id") : nullptr;
+    if (attributes != nullptr && !cJSON_IsString(area_id_item)) {
+        // Attributes present but no area: the device is currently unlocated
+        area_id_item = nullptr;
+    } else if (attributes == nullptr) {
+        return; // state-only update; area unchanged
+    }
+
+    xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    copy_string(hass->device_area_id, sizeof(hass->device_area_id), area_id_item ? area_id_item->valuestring : "");
+    xSemaphoreGive(hass->mutex);
+
+    ESP_LOGI(TAG, "Device area update: '%s'", area_id_item ? area_id_item->valuestring : "(none)");
+    hass_update_device_room(hass);
+}
+
 static void hass_parse_standby_entity_update(home_assistant_context_t* hass, const char* entity_id, cJSON* item) {
     if (!entity_id || !item || !cJSON_IsObject(item)) {
         return;
     }
 
+    bool is_device_area = false;
     bool is_weather = false;
     bool is_battery_soc = false;
     bool is_house_direct = false;
@@ -989,6 +1026,7 @@ static void hass_parse_standby_entity_update(home_assistant_context_t* hass, con
     int8_t battery_in_idx = -1;
 
     xSemaphoreTake(hass->mutex, portMAX_DELAY);
+    is_device_area = has_entity_id(hass->device_area_entity_id) && strcmp(entity_id, hass->device_area_entity_id) == 0;
     is_weather = has_entity_id(hass->standby_weather_entity_id) && strcmp(entity_id, hass->standby_weather_entity_id) == 0;
     is_battery_soc = has_entity_id(hass->standby_energy_battery_soc_entity_id) && strcmp(entity_id, hass->standby_energy_battery_soc_entity_id) == 0;
     is_house_direct = has_entity_id(hass->standby_energy_house_entity_id) && strcmp(entity_id, hass->standby_energy_house_entity_id) == 0;
@@ -999,6 +1037,11 @@ static void hass_parse_standby_entity_update(home_assistant_context_t* hass, con
     battery_out_idx = standby_energy_series_find(&hass->standby_battery_out_series, entity_id);
     battery_in_idx = standby_energy_series_find(&hass->standby_battery_in_series, entity_id);
     xSemaphoreGive(hass->mutex);
+
+    if (is_device_area) {
+        hass_parse_device_area_update(hass, item);
+        return;
+    }
 
     if (is_weather) {
         hass_parse_weather_entity_update(hass, item);
@@ -1810,6 +1853,7 @@ void hass_handle_result(home_assistant_context_t* hass, cJSON* json) {
         hass_parse_entity_registry(hass, result_item);
         hass_refresh_entities_from_store(hass);
         store_finish_room_sync(hass->store);
+        hass_update_device_room(hass); // room indices may have shifted
         xSemaphoreTake(hass->mutex, portMAX_DELAY);
         const uint8_t entity_count = hass->entity_count;
         xSemaphoreGive(hass->mutex);

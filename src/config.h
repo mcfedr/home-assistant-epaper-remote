@@ -8,6 +8,9 @@ struct Configuration {
     const char* home_assistant_token;
     const char* root_ca;
 
+    // Bermuda area sensor tracking this device's room (optional)
+    const char* bermuda_area_entity_id;
+
     // Standby screen data sources
     const char* weather_entity_id;
     const char* energy_solar_entity_id;

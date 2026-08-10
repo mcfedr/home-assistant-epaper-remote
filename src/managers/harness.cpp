@@ -203,6 +203,7 @@ static esp_err_t state_get_handler(httpd_req_t* req) {
     cJSON_AddNumberToObject(root, "standby_revision", ui_state.standby_revision);
     cJSON_AddStringToObject(root, "wifi", conn_state_name(info.wifi));
     cJSON_AddStringToObject(root, "home_assistant", conn_state_name(info.home_assistant));
+    cJSON_AddNumberToObject(root, "device_room", store_get_device_room(harness_ctx->store));
 
     store_get_floor_list_snapshot(harness_ctx->store, &floor_list);
     cJSON* floors = cJSON_AddArrayToObject(root, "floors");
