@@ -1450,15 +1450,21 @@ void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, uint8_
         char page_text[20];
         snprintf(page_text, sizeof(page_text), "Page %u/%u", static_cast<unsigned>(room_controls_page + 1),
                  static_cast<unsigned>(room_controls_page_count));
-        BB_RECT page_rect = get_text_box(epaper, page_text);
-        constexpr int16_t badge_h = 32;
-        const int16_t badge_w = page_rect.w + 24;
+
+        // Size the badge around the measured text instead of guessing
+        epaper->setFont(Montserrat_Regular_16);
+        int16_t text_w, text_h, text_ascent;
+        measure_line(epaper, page_text, &text_w, &text_h, &text_ascent);
+        constexpr int16_t pad_x = 14;
+        constexpr int16_t pad_y = 9;
+        const int16_t badge_w = text_w + 2 * pad_x + 1; // +1 for the reinforce double-strike
+        const int16_t badge_h = text_h + 2 * pad_y;
         const int16_t badge_x = DISPLAY_WIDTH - ROOM_CONTROLS_ITEM_X - badge_w;
         const int16_t badge_y = (ROOM_CONTROLS_HEADER_HEIGHT - badge_h) / 2;
 
-        epaper->fillRoundRect(badge_x, badge_y, badge_w, badge_h, 10, ui_band(epaper));
-        epaper->drawRoundRect(badge_x, badge_y, badge_w, badge_h, 10, BBEP_BLACK);
-        draw_text_at(epaper, badge_x + 12, badge_y + 22, page_text, true);
+        epaper->fillRoundRect(badge_x, badge_y, badge_w, badge_h, 12, ui_band(epaper));
+        epaper->drawRoundRect(badge_x, badge_y, badge_w, badge_h, 12, BBEP_BLACK);
+        draw_text_at(epaper, badge_x + pad_x, badge_y + pad_y + text_ascent, page_text, true);
     }
 
     epaper->drawLine(0, ROOM_CONTROLS_HEADER_HEIGHT, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, BBEP_BLACK);
