@@ -33,6 +33,10 @@ static HarnessTaskArgs harness_task_args;
 void setup() {
     console_init();
 
+    // BLE beacon for Bermuda room presence. Must initialize before the panel
+    // and Wi-Fi come up; guarded so a wedged boot disables it on the next one.
+    launch_beacon();
+
     // Initialize objects
     store_init(&store);
     ui_state_init(&shared_ui_state);
@@ -46,10 +50,6 @@ void setup() {
     epaper.setPasses(DISPLAY_PARTIAL_UPDATE_PASSES, DISPLAY_FULL_UPDATE_PASSES);
     epaper.einkPower(true); // FIXME: Disabling power makes the GT911 unavailable
 
-    // BLE beacon for Bermuda room presence; must initialize before Wi-Fi connects.
-    // FIXME: disabled — boot-time init currently wedges the board (see hardening notes);
-    // init after Wi-Fi drops the link instead. Needs init-order investigation.
-    // launch_beacon(&store);
 
     // Launch UI task
     ui_task_args.epaper = &epaper;
@@ -93,6 +93,10 @@ void setup() {
 void loop() {
     wifi_poll();
     console_poll();
+
+    if (millis() > 60000) {
+        beacon_mark_boot_healthy();
+    }
 
     if (HOME_BUTTON_PIN >= 0) {
         static bool was_pressed = false;

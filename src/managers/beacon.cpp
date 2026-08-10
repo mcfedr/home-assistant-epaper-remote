@@ -1,6 +1,7 @@
 #include "managers/beacon.h"
 #include "constants.h"
 #include "esp_log.h"
+#include <Preferences.h>
 
 #include "host/ble_gap.h"
 #include "host/ble_hs.h"
@@ -11,8 +12,54 @@
 
 #include <cstring>
 
+// The Arduino core releases the BT controller's memory at boot unless this
+// weak symbol reports Bluetooth in use; without it btdm_controller_init
+// crashes freeing the already-released region.
+extern "C" bool btInUse() {
+    return true;
+}
+
 static const char* TAG = "beacon";
 static const char* volatile g_beacon_status = "off";
+static bool g_beacon_attempted = false;
+static bool g_boot_marked_healthy = false;
+
+static constexpr const char* BEACON_PREFS_NS = "beacon";
+static constexpr const char* BEACON_GUARD_KEY = "guard";
+
+// The guard flag is set in NVS before the risky BT init and cleared only once
+// the boot proves stable. A boot that wedged leaves it set, so the next boot
+// (after a plain power cycle) skips BLE and comes up healthy and flashable.
+static void beacon_set_guard(uint8_t value) {
+    Preferences prefs;
+    if (prefs.begin(BEACON_PREFS_NS, false)) {
+        prefs.putUChar(BEACON_GUARD_KEY, value);
+        prefs.end();
+    }
+}
+
+static uint8_t beacon_get_guard() {
+    Preferences prefs;
+    if (!prefs.begin(BEACON_PREFS_NS, true)) {
+        return 0;
+    }
+    uint8_t value = prefs.getUChar(BEACON_GUARD_KEY, 0);
+    prefs.end();
+    return value;
+}
+
+void beacon_mark_boot_healthy() {
+    if (!g_beacon_attempted || g_boot_marked_healthy) {
+        return;
+    }
+    g_boot_marked_healthy = true;
+    beacon_set_guard(0);
+    ESP_LOGI(TAG, "boot healthy, wedge guard cleared");
+}
+
+void beacon_clear_guard() {
+    beacon_set_guard(0);
+}
 
 static void beacon_start_advertising() {
     ble_svc_gap_device_name_set(BEACON_NAME);
@@ -64,8 +111,15 @@ static void beacon_host_task(void*) {
 // a Wi-Fi link is active disrupts the shared radio and drops the connection
 // (observed as an immediate disconnect loop after every GOT_IP). Bringing both
 // stacks up at boot lets the coexistence layer arbitrate from the start.
-void launch_beacon(EntityStore* store) {
-    (void)store;
+void launch_beacon() {
+    if (beacon_get_guard() != 0) {
+        ESP_LOGW(TAG, "previous boot did not reach healthy with BLE enabled; skipping beacon init");
+        g_beacon_status = "guarded";
+        return;
+    }
+    beacon_set_guard(1);
+    g_beacon_attempted = true;
+
     g_beacon_status = "starting";
     esp_err_t err = nimble_port_init();
     if (err != ESP_OK) {

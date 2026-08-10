@@ -25,8 +25,14 @@ static void console_dispatch(const char* line) {
         esp_restart();
     } else if (strcmp(line, "beacon") == 0) {
         Serial.printf("[console] beacon=%s\n", beacon_status());
+    } else if (strcmp(line, "beacon retry") == 0) {
+        Serial.println("[console] clearing beacon wedge guard and rebooting");
+        beacon_clear_guard();
+        Serial.flush();
+        delay(100);
+        esp_restart();
     } else if (strcmp(line, "help") == 0) {
-        Serial.println("[console] commands: wifi | wifi retry | wifi reset | beacon | reboot");
+        Serial.println("[console] commands: wifi | wifi retry | wifi reset | beacon | beacon retry | reboot");
     } else {
         Serial.printf("[console] unknown command '%s' (try help)\n", line);
     }
