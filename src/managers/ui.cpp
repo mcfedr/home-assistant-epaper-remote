@@ -1441,13 +1441,16 @@ void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, uint8_
         snprintf(page_text, sizeof(page_text), "Page %u/%u", static_cast<unsigned>(room_controls_page + 1),
                  static_cast<unsigned>(room_controls_page_count));
         BB_RECT page_rect = get_text_box(epaper, page_text);
-        const int16_t badge_w = page_rect.w + 20;
+        constexpr int16_t badge_h = 32;
+        const int16_t badge_w = page_rect.w + 24;
         const int16_t badge_x = DISPLAY_WIDTH - ROOM_CONTROLS_ITEM_X - badge_w;
-        const int16_t badge_y = ROOM_CONTROLS_BACK_Y + 36;
+        const int16_t badge_y = (ROOM_CONTROLS_HEADER_HEIGHT - badge_h) / 2;
 
-        epaper->fillRoundRect(badge_x, badge_y, badge_w, 26, 10, 0xe);
-        epaper->drawRoundRect(badge_x, badge_y, badge_w, 26, 10, BBEP_BLACK);
-        draw_text_at(epaper, badge_x + 10, badge_y + 18, page_text, true);
+        // This header also renders into the 1bpp partial-update plane, where 0xe is black
+        const uint8_t badge_fill = epaper->getMode() == BB_MODE_1BPP ? BBEP_WHITE : 0xe;
+        epaper->fillRoundRect(badge_x, badge_y, badge_w, badge_h, 10, badge_fill);
+        epaper->drawRoundRect(badge_x, badge_y, badge_w, badge_h, 10, BBEP_BLACK);
+        draw_text_at(epaper, badge_x + 12, badge_y + 22, page_text, true);
     }
 
     epaper->drawLine(0, ROOM_CONTROLS_HEADER_HEIGHT, DISPLAY_WIDTH, ROOM_CONTROLS_HEADER_HEIGHT, BBEP_BLACK);

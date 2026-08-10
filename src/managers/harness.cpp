@@ -354,6 +354,8 @@ static esp_err_t swipe_post_handler(httpd_req_t* req) {
 }
 
 static esp_err_t home_post_handler(httpd_req_t* req) {
+    // Without this the standby timer can re-fire immediately after going home
+    store_note_interaction(harness_ctx->store, millis());
     store_go_home(harness_ctx->store);
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
