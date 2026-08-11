@@ -1730,6 +1730,18 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
             command_type = CommandType::SetCoverOpenClose;
         } else if (strncmp(entity_id_item->valuestring, "valve.", 6) == 0) {
             command_type = CommandType::ValveOpenClose;
+        } else if (strncmp(entity_id_item->valuestring, "switch.", 7) == 0) {
+            // Only plain switches (outlets etc.); config/diagnostic toggles like
+            // "overload protection" carry an entity category
+            cJSON* category_item = cJSON_GetObjectItem(item, "entity_category");
+            if (category_item == nullptr) {
+                category_item = cJSON_GetObjectItem(item, "ec");
+            }
+            if (category_item != nullptr && !cJSON_IsNull(category_item)) {
+                continue;
+            }
+            ESP_LOGI(TAG, "Including switch %s", entity_id_item->valuestring);
+            command_type = CommandType::SwitchOnOff;
         } else {
             continue;
         }

@@ -16,6 +16,8 @@ class TestConfig:
     light_entity: str
     cover_entity: str
     climate_entity: str
+    outlet_entity: str
+    outlet_room: str
 
     @classmethod
     def from_env(cls) -> "TestConfig":
@@ -28,4 +30,6 @@ class TestConfig:
             light_entity=os.environ.get("E2E_LIGHT_ENTITY", "light.shellydimmer2_485519f94299"),
             cover_entity=os.environ.get("E2E_COVER_ENTITY", "cover.office_blind_left"),
             climate_entity=os.environ.get("E2E_CLIMATE_ENTITY", "climate.office_ac2"),
+            outlet_entity=os.environ.get("E2E_OUTLET_ENTITY", "switch.shellyplus1pm_cc7b5c823d78_switch_0"),
+            outlet_room=os.environ.get("E2E_OUTLET_ROOM", "Bathroom"),
         )

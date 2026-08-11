@@ -1401,13 +1401,21 @@ bool ui_build_room_controls(Screen* screen,
                 break;
             }
 
-            const bool is_valve = entity_type == CommandType::ValveOpenClose;
+            const uint8_t* icon_on = lightbulb_outline;
+            const uint8_t* icon_off = lightbulb_off_outline;
+            if (entity_type == CommandType::ValveOpenClose) {
+                icon_on = water;
+                icon_off = water_off;
+            } else if (entity_type == CommandType::SwitchOnOff) {
+                icon_on = power_socket;
+                icon_off = power_socket_off;
+            }
             screen_add_button(
                 ButtonConfig{
                     .entity_ref = EntityRef{.index = snapshot->entity_ids[idx]},
                     .label = snapshot->entity_names[idx],
-                    .icon_on = is_valve ? water : lightbulb_outline,
-                    .icon_off = is_valve ? water_off : lightbulb_off_outline,
+                    .icon_on = icon_on,
+                    .icon_off = icon_off,
                     .pos_x = static_cast<uint16_t>(ROOM_CONTROLS_ITEM_X + draw_light_col * (light_width + ROOM_CONTROLS_LIGHT_COLUMN_GAP)),
                     .pos_y = draw_y,
                     .width = light_width,
