@@ -73,6 +73,29 @@ bool harness_get_samples(BBCapTouch* bbct, TOUCHINFO* ti) {
     return bbct->getSamples(ti);
 }
 
+static const char* reset_reason_name() {
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:
+        return "poweron";
+    case ESP_RST_SW:
+        return "software";
+    case ESP_RST_PANIC:
+        return "panic";
+    case ESP_RST_INT_WDT:
+        return "int_watchdog";
+    case ESP_RST_TASK_WDT:
+        return "task_watchdog";
+    case ESP_RST_WDT:
+        return "watchdog";
+    case ESP_RST_BROWNOUT:
+        return "brownout";
+    case ESP_RST_DEEPSLEEP:
+        return "deepsleep";
+    default:
+        return "other";
+    }
+}
+
 static const char* conn_state_name(ConnState state) {
     switch (state) {
     case ConnState::Initializing:
@@ -171,6 +194,7 @@ static esp_err_t health_get_handler(httpd_req_t* req) {
     cJSON_AddNumberToObject(root, "internal_free", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     cJSON_AddNumberToObject(root, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     cJSON_AddStringToObject(root, "beacon", beacon_status());
+    cJSON_AddStringToObject(root, "reset_reason", reset_reason_name());
     cJSON_AddStringToObject(root, "wifi", conn_state_name(info.wifi));
     cJSON_AddStringToObject(root, "home_assistant", conn_state_name(info.home_assistant));
     cJSON_AddStringToObject(root, "ip", info.ip_address);

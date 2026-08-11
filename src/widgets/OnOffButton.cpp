@@ -128,7 +128,9 @@ OnOffButton::OnOffButton(const char* label, const uint8_t* on_icon, const uint8_
     const int16_t sprite_cap = BUTTON_SIZE;
     const int16_t min_sprite = BUTTON_ICON_SIZE;
     const int16_t clamped_sprite = std::max<int16_t>(min_sprite, std::min<int16_t>(desired_sprite, sprite_cap));
-    sprite_size_ = static_cast<uint16_t>(clamped_sprite);
+    // Keep the sprite an even size: FastEPD allocates (w*h)/2 rounded down for
+    // 4bpp sprites, so odd sizes write one row-end byte past the buffer
+    sprite_size_ = static_cast<uint16_t>(clamped_sprite & ~1);
 
     icon_rect_ = Rect{
         .x = static_cast<uint16_t>(rect_.x + (rect_.w - sprite_size_) / 2),

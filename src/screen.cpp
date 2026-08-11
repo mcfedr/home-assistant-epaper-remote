@@ -5,6 +5,7 @@
 #include "widgets/OnOffButton.h"
 #include "widgets/Slider.h"
 
+
 void screen_add_slider(SliderConfig config, Screen* screen) {
     if (screen->widget_count >= MAX_WIDGETS_PER_SCREEN) {
         esp_system_abort("too many widgets configured");
