@@ -42,6 +42,14 @@ static void console_dispatch(const char* line) {
     } else if (strcmp(line, "power sleep off") == 0) {
         power_set_modem_sleep(false);
         Serial.println("[console] modem sleep off");
+    } else if (strncmp(line, "sleep test ", 11) == 0) {
+        const uint32_t seconds = static_cast<uint32_t>(atoi(line + 11));
+        if (seconds > 0 && seconds <= 600) {
+            Serial.printf("[console] deep sleeping, wake: touch / button / %lus timer\n", static_cast<unsigned long>(seconds));
+            power_deep_sleep_test(seconds);
+        } else {
+            Serial.println("[console] sleep test <1..600 seconds>");
+        }
     } else if (strncmp(line, "power cpu ", 10) == 0) {
         const uint32_t mhz = static_cast<uint32_t>(atoi(line + 10));
         Serial.printf("[console] idle cpu %lu MHz: %s\n", static_cast<unsigned long>(mhz),

@@ -733,7 +733,7 @@ void ui_draw_settings_menu(FASTEPD* epaper, const BatteryStatus* battery) {
     draw_text_at(epaper, SETTINGS_STANDBY_TILE_X + 24, SETTINGS_STANDBY_TILE_Y + 102, "Open now for debug");
 
     // Battery status card (informational, not tappable)
-    const int16_t battery_y = SETTINGS_STANDBY_TILE_Y + SETTINGS_STANDBY_TILE_H + SETTINGS_TILE_GAP;
+    const int16_t battery_y = SETTINGS_BATTERY_CARD_Y;
     epaper->fillRoundRect(SETTINGS_TILE_X, battery_y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, ui_band(epaper));
     epaper->drawRoundRect(SETTINGS_TILE_X, battery_y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, BBEP_BLACK);
 
@@ -752,6 +752,37 @@ void ui_draw_settings_menu(FASTEPD* epaper, const BatteryStatus* battery) {
     }
     epaper->setFont(Montserrat_Regular_16);
     draw_text_at(epaper, SETTINGS_TILE_X + 24, battery_y + 102, battery_line);
+
+    epaper->fillRoundRect(SETTINGS_TILE_X, SETTINGS_SLEEP_TILE_Y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, ui_white(epaper));
+    epaper->drawRoundRect(SETTINGS_TILE_X, SETTINGS_SLEEP_TILE_Y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, BBEP_BLACK);
+
+    epaper->setFont(Montserrat_Regular_20);
+    draw_text_at(epaper, SETTINGS_TILE_X + 24, SETTINGS_SLEEP_TILE_Y + 68, "Sleep Test");
+    char sleep_line[64];
+    snprintf(sleep_line, sizeof(sleep_line), "Tap to sleep - last wake: %s", power_wake_cause());
+    epaper->setFont(Montserrat_Regular_16);
+    draw_text_at(epaper, SETTINGS_TILE_X + 24, SETTINGS_SLEEP_TILE_Y + 102, sleep_line);
+}
+
+static void ui_draw_sleep_test(FASTEPD* epaper) {
+    epaper->setMode(BB_MODE_4BPP);
+    epaper->fillScreen(ui_white(epaper));
+    epaper->setTextColor(BBEP_BLACK);
+
+    static const char* const lines[] = {"Sleeping...", "Touch me to wake", nullptr};
+    epaper->setFont(Montserrat_Regular_26);
+    int16_t cursor_y = DISPLAY_HEIGHT / 2 - 60;
+    for (size_t i = 0; lines[i] != nullptr; ++i) {
+        BB_RECT rect = get_text_box(epaper, lines[i]);
+        draw_text_at(epaper, (DISPLAY_WIDTH - rect.w) / 2, cursor_y, lines[i]);
+        cursor_y += rect.h + 30;
+    }
+
+    epaper->setFont(Montserrat_Regular_16);
+    char backstop_line[48];
+    snprintf(backstop_line, sizeof(backstop_line), "Auto-wake in %lus", static_cast<unsigned long>(SLEEP_TEST_TIMER_BACKSTOP_S));
+    BB_RECT rect = get_text_box(epaper, backstop_line);
+    draw_text_at(epaper, (DISPLAY_WIDTH - rect.w) / 2, DISPLAY_HEIGHT - 60, backstop_line);
 }
 
 static void ui_draw_wifi_network_row(FASTEPD* epaper, int16_t x, int16_t y, int16_t w, const WifiNetwork& network, bool connected) {
@@ -1556,6 +1587,13 @@ void ui_task(void* arg) {
         if (ulTaskNotifyTake(pdTRUE, notify_timeout)) {
             xSemaphoreTake(ctx->store->epaper_mutex, portMAX_DELAY);
             power_draw_boost_begin(); // e-ink waveform timing needs full CPU speed
+
+            if (store_take_sleep_test_request(ctx->store)) {
+                ui_draw_sleep_test(ctx->epaper);
+                ctx->epaper->fullUpdate(CLEAR_FAST, true);
+                power_deep_sleep_test(SLEEP_TEST_TIMER_BACKSTOP_S); // does not return
+            }
+
             store_update_ui_state(ctx->store, ctx->screen, &current_state);
 
             const bool mode_changed = current_state.mode != displayed_state.mode;

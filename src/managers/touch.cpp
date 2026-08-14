@@ -70,6 +70,8 @@ static bool i2c_read_reg16_block(uint8_t addr, uint16_t reg, uint8_t* buf, size_
     return true;
 }
 
+static uint8_t g_gt911_addr = 0; // set once the touch task has configured the controller
+
 static bool detect_gt911_address(uint8_t* out_addr) {
     if (i2c_device_present(GT911_ADDR1)) {
         *out_addr = GT911_ADDR1;
@@ -82,7 +84,7 @@ static bool detect_gt911_address(uint8_t* out_addr) {
     return false;
 }
 
-static bool configure_gt911_low_level_query(uint8_t addr) {
+static bool configure_gt911_int_mode(uint8_t addr, uint8_t int_mode_bits) {
     constexpr uint16_t GT911_CFG_START_REG = 0x8047;
     constexpr uint16_t GT911_MODULE_SWITCH_1_REG = 0x804D;
     constexpr uint16_t GT911_CFG_CHECKSUM_REG = 0x80FF;
@@ -92,7 +94,7 @@ static bool configure_gt911_low_level_query(uint8_t addr) {
     if (!i2c_read_reg16(addr, GT911_MODULE_SWITCH_1_REG, &module_switch, 1)) {
         return false;
     }
-    const uint8_t desired_mode = static_cast<uint8_t>((module_switch & 0xFC) | 0x02); // LOW_LEVEL_QUERY
+    const uint8_t desired_mode = static_cast<uint8_t>((module_switch & 0xFC) | (int_mode_bits & 0x03));
 
     if (!i2c_write_reg16(addr, GT911_MODULE_SWITCH_1_REG, desired_mode)) {
         return false;
@@ -164,6 +166,11 @@ static bool is_settings_wifi_tile_touched(const TouchEvent* touch_event) {
 static bool is_settings_standby_tile_touched(const TouchEvent* touch_event) {
     return touch_event->x >= SETTINGS_STANDBY_TILE_X && touch_event->x < SETTINGS_STANDBY_TILE_X + SETTINGS_STANDBY_TILE_W &&
            touch_event->y >= SETTINGS_STANDBY_TILE_Y && touch_event->y < SETTINGS_STANDBY_TILE_Y + SETTINGS_STANDBY_TILE_H;
+}
+
+static bool is_settings_sleep_tile_touched(const TouchEvent* touch_event) {
+    return touch_event->x >= SETTINGS_TILE_X && touch_event->x < SETTINGS_TILE_X + SETTINGS_TILE_W &&
+           touch_event->y >= SETTINGS_SLEEP_TILE_Y && touch_event->y < SETTINGS_SLEEP_TILE_Y + SETTINGS_TILE_H;
 }
 
 static bool is_wifi_scan_button_touched(const TouchEvent* touch_event) {
@@ -402,6 +409,16 @@ static int16_t list_index_from_touch(const TouchEvent* touch_event, uint8_t item
     return item_idx < item_count ? item_idx : -1;
 }
 
+// Deep sleep wakes on the INT line going low; low-level-query mode does not
+// assert INT on its own, so switch to falling-edge pulses before sleeping.
+// The next boot restores query mode.
+bool touch_prepare_for_sleep() {
+    if (g_gt911_addr == 0) {
+        return false;
+    }
+    return configure_gt911_int_mode(g_gt911_addr, 0x01);
+}
+
 void touch_task(void* arg) {
     TouchTaskArgs* ctx = static_cast<TouchTaskArgs*>(arg);
     BBCapTouch* bbct = ctx->bbct;
@@ -442,11 +459,12 @@ void touch_task(void* arg) {
     const bool poll_cst226_home = (type == CT_TYPE_CST226) || cst226_addr_present;
     ESP_LOGI(TAG, "Touch home key polling: GT911=%d CST226=%d", poll_gt911_home ? 1 : 0, poll_cst226_home ? 1 : 0);
     if (poll_gt911_home && gt911_addr_present) {
-        if (configure_gt911_low_level_query(gt911_addr)) {
+        if (configure_gt911_int_mode(gt911_addr, 0x02)) { // low level query for home-key polling
             ESP_LOGI(TAG, "Configured GT911 interrupt mode to LOW_LEVEL_QUERY");
         } else {
             ESP_LOGW(TAG, "Failed to configure GT911 interrupt mode");
         }
+        g_gt911_addr = gt911_addr;
     }
     while (true) {
         const uint32_t now_ms = millis();
@@ -723,6 +741,8 @@ void touch_task(void* arg) {
                         if (store_open_standby(store, now_ms)) {
                             standby_touch_ignore_until_ms = now_ms + 600;
                         }
+                    } else if (is_settings_sleep_tile_touched(&touch_start)) {
+                        store_request_sleep_test(store);
                     }
                     touching = false;
                     swallow_touch_release = false;

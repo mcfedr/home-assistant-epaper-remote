@@ -12,3 +12,4 @@ struct TouchTaskArgs {
 };
 
 void touch_task(void* arg);
+bool touch_prepare_for_sleep();

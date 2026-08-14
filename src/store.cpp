@@ -917,6 +917,21 @@ bool store_open_wifi_settings(EntityStore* store) {
     return true;
 }
 
+void store_request_sleep_test(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    store->sleep_test_requested = true;
+    xSemaphoreGive(store->mutex);
+    notify_ui(store);
+}
+
+bool store_take_sleep_test_request(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool requested = store->sleep_test_requested;
+    store->sleep_test_requested = false;
+    xSemaphoreGive(store->mutex);
+    return requested;
+}
+
 bool store_open_wifi_password(EntityStore* store, const char* ssid) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     const bool mode_changed = store->settings_mode != SettingsMode::WifiPassword;

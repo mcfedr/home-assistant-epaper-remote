@@ -202,6 +202,7 @@ static esp_err_t health_get_handler(httpd_req_t* req) {
     char power[96];
     power_report(power, sizeof(power));
     cJSON_AddStringToObject(root, "power", power);
+    cJSON_AddStringToObject(root, "wake_cause", power_wake_cause());
 
     BatteryStatus battery;
     store_get_battery(harness_ctx->store, &battery);

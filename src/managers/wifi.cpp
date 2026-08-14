@@ -646,6 +646,7 @@ void wifi_poll() {
         g_wifi_auto_restart_count++;
         ESP_LOGE(TAG, "Wi-Fi unrecoverable after resets and backoff; restarting device (%lu/%lu)",
                  static_cast<unsigned long>(g_wifi_auto_restart_count), static_cast<unsigned long>(WIFI_MAX_AUTO_RESTARTS));
+        WiFi.disconnect(true); // deauth so the AP drops the session; a ghost session earns AUTH_EXPIRE throttling on rejoin
         delay(100);
         esp_restart();
     }

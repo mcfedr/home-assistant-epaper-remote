@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "managers/home_assistant.h"
+#include "managers/power.h"
 #include "store.h"
 #include <cJSON.h>
 #include <cctype>
@@ -460,6 +461,7 @@ static bool cover_entity_should_be_included(cJSON* item, const char* entity_id, 
 }
 
 static void hass_reset_discovery_state(home_assistant_context_t* hass) {
+    power_wifi_sleep_hold(false); // don't leak the hold if the connection dies mid-discovery
     xSemaphoreTake(hass->mutex, portMAX_DELAY);
     hass->floor_registry_request_id = 0;
     hass->area_registry_request_id = 0;
@@ -1770,6 +1772,7 @@ void hass_parse_entity_registry(home_assistant_context_t* hass, cJSON* result) {
 void hass_start_discovery(home_assistant_context_t* hass) {
     ESP_LOGI(TAG, "Starting room entity discovery");
     hass_reset_discovery_state(hass);
+    power_wifi_sleep_hold(true); // registry payloads drain internal heap; keep the PHY enabled until the first state sync lands
     store_begin_room_sync(hass->store);
     hass_set_pending_discovery_command(hass, DiscoveryCommandRequestFloorRegistry);
 }
@@ -1900,6 +1903,7 @@ void hass_handle_server_payload(home_assistant_context_t* hass, cJSON* json) {
         if (cJSON_IsObject(event)) {
             hass_handle_entity_update(hass, event);
         }
+        power_wifi_sleep_hold(false); // the first event is the full state sync — discovery burst is over
     } else {
         ESP_LOGI(TAG, "Ignoring HASS event type %s", type_item->valuestring);
     }

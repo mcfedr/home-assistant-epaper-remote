@@ -209,6 +209,8 @@ struct EntityStore {
 
     int8_t device_room_idx = -1; // room the device is physically in, per Bermuda
 
+    bool sleep_test_requested = false;
+
     bool battery_valid = false;
     uint8_t battery_pct = 0;
     uint16_t battery_mv = 0;
@@ -285,6 +287,8 @@ bool store_open_standby(EntityStore* store, uint32_t now_ms);
 bool store_settings_back(EntityStore* store);
 bool store_close_settings(EntityStore* store);
 bool store_close_wifi_settings_if_open(EntityStore* store);
+void store_request_sleep_test(EntityStore* store);
+bool store_take_sleep_test_request(EntityStore* store);
 bool store_shift_wifi_list_page(EntityStore* store, int8_t delta);
 bool store_set_wifi_password_symbols(EntityStore* store, bool symbols);
 bool store_toggle_wifi_password_shift(EntityStore* store);
