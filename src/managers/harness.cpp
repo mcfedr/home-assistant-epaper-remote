@@ -1,5 +1,6 @@
 #include "managers/harness.h"
 #include "managers/beacon.h"
+#include "managers/mqtt.h"
 #include "boards.h"
 #include "constants.h"
 #include "esp_heap_caps.h"
@@ -194,6 +195,7 @@ static esp_err_t health_get_handler(httpd_req_t* req) {
     cJSON_AddNumberToObject(root, "internal_free", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     cJSON_AddNumberToObject(root, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     cJSON_AddStringToObject(root, "beacon", beacon_status());
+    cJSON_AddStringToObject(root, "mqtt", mqtt_status());
     cJSON_AddStringToObject(root, "reset_reason", reset_reason_name());
 
     BatteryStatus battery;

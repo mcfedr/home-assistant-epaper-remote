@@ -6,6 +6,7 @@
 #include "managers/console.h"
 #include "managers/harness.h"
 #include "managers/home_assistant.h"
+#include "managers/mqtt.h"
 #include "managers/touch.h"
 #include "managers/ui.h"
 #include "managers/wifi.h"
@@ -30,6 +31,7 @@ static UITaskArgs ui_task_args;
 static TouchTaskArgs touch_task_args;
 static HomeAssistantTaskArgs hass_task_args;
 static HarnessTaskArgs harness_task_args;
+static MqttTaskArgs mqtt_task_args;
 
 void setup() {
     console_init();
@@ -80,6 +82,11 @@ void setup() {
     harness_task_args.epaper = &epaper;
     harness_task_args.shared_state = &shared_ui_state;
     launch_harness(&harness_task_args);
+
+    // Device telemetry into Home Assistant via MQTT discovery
+    mqtt_task_args.config = &config;
+    mqtt_task_args.store = &store;
+    launch_mqtt(&mqtt_task_args);
 
 
     if (HOME_BUTTON_PIN >= 0) {

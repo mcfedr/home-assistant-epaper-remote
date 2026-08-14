@@ -58,6 +58,7 @@ constexpr uint32_t STANDBY_REFRESH_INTERVAL_MS = 3600000; // 1 hour
 
 // Battery telemetry
 constexpr uint32_t BATTERY_SAMPLE_INTERVAL_MS = 30000;
+constexpr uint32_t MQTT_PUBLISH_INTERVAL_MS = 60000;
 constexpr int16_t BATTERY_CHARGE_IDLE_BAND_MA = 25; // below this magnitude, report idle
 
 // BLE beacon for Bermuda room presence

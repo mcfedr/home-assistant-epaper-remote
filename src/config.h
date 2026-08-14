@@ -11,6 +11,10 @@ struct Configuration {
     // Bermuda area sensor tracking this device's room (optional)
     const char* bermuda_area_entity_id;
 
+    // MQTT broker for publishing device telemetry to Home Assistant (optional),
+    // e.g. "mqtt://192.168.0.10:1883"
+    const char* mqtt_uri;
+
     // Standby screen data sources
     const char* weather_entity_id;
     const char* energy_solar_entity_id;
