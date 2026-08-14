@@ -203,6 +203,8 @@ static esp_err_t health_get_handler(httpd_req_t* req) {
     power_report(power, sizeof(power));
     cJSON_AddStringToObject(root, "power", power);
     cJSON_AddStringToObject(root, "wake_cause", power_wake_cause());
+    cJSON_AddBoolToObject(root, "standby_sleep", power_standby_sleep_enabled());
+    cJSON_AddStringToObject(root, "sleep_inhibit", power_sleep_inhibit());
 
     BatteryStatus battery;
     store_get_battery(harness_ctx->store, &battery);
@@ -402,6 +404,10 @@ static esp_err_t power_post_handler(httpd_req_t* req) {
     cJSON* modem_sleep = cJSON_GetObjectItem(body, "modem_sleep");
     if (cJSON_IsBool(modem_sleep)) {
         power_set_modem_sleep(cJSON_IsTrue(modem_sleep));
+    }
+    cJSON* standby_sleep = cJSON_GetObjectItem(body, "standby_sleep");
+    if (cJSON_IsBool(standby_sleep)) {
+        power_set_standby_sleep(cJSON_IsTrue(standby_sleep));
     }
     cJSON* cpu = cJSON_GetObjectItem(body, "cpu_mhz");
     if (cJSON_IsNumber(cpu)) {

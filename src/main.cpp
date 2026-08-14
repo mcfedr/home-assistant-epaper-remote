@@ -35,7 +35,7 @@ static HarnessTaskArgs harness_task_args;
 static MqttTaskArgs mqtt_task_args;
 
 void setup() {
-    console_init();
+    console_init(&store);
     power_init();
 
     // BLE beacon for Bermuda room presence. Must initialize before the panel
@@ -54,6 +54,13 @@ void setup() {
     epaper.setRotation(90);
     epaper.setPasses(DISPLAY_PARTIAL_UPDATE_PASSES, DISPLAY_FULL_UPDATE_PASSES);
     epaper.einkPower(true); // FIXME: Disabling power makes the GT911 unavailable
+
+    // Waking from standby sleep: the panel still shows the old standby screen.
+    // Acknowledge the touch right away and open the device's room once known.
+    if (power_boot_mode() == PowerBootMode::WakeToRoom) {
+        store_arm_wake_to_room(&store, millis() + WAKE_TO_ROOM_WINDOW_MS);
+        ui_draw_wake_glyph(&epaper);
+    }
 
 
     // Launch UI task
@@ -107,7 +114,10 @@ void loop() {
 
     if (millis() > 60000) {
         beacon_mark_boot_healthy();
+        power_mark_boot_healthy();
     }
+
+    power_standby_sleep_poll(&store);
 
     if (HOME_BUTTON_PIN >= 0) {
         static bool was_pressed = false;

@@ -56,6 +56,15 @@ constexpr uint8_t DISPLAY_FULL_UPDATE_PASSES = 4;
 constexpr uint32_t STANDBY_IDLE_TIMEOUT_MS = 120000;
 constexpr uint32_t STANDBY_REFRESH_INTERVAL_MS = 3600000; // 1 hour
 
+// Deep-sleep standby (battery only; e-ink keeps the standby image at ~0 cost)
+constexpr uint32_t STANDBY_SLEEP_SETTLE_MS = 60000;      // standby must be on screen this long before sleeping
+constexpr uint32_t STANDBY_SLEEP_TIMER_S = 3600;         // hourly silent refresh
+constexpr uint32_t SILENT_REFRESH_BACKSTOP_MS = 90000;   // sleep again even if the refresh never completes
+constexpr uint32_t SILENT_REFRESH_LINGER_MS = 8000;      // publish window after standby data lands
+constexpr uint32_t WAKE_TO_ROOM_WINDOW_MS = 20000;       // navigate to the device room only this soon after a wake
+constexpr uint8_t WAKE_BOOT_STREAK_LIMIT = 3;            // wake boots that crash before proving healthy disable sleep
+constexpr const char* TIME_TZ = "EET-2EEST,M3.5.0/3,M10.5.0/4"; // Europe/Kyiv, matching the HA instance
+
 // Battery telemetry
 constexpr uint32_t BATTERY_SAMPLE_INTERVAL_MS = 30000;
 constexpr uint32_t MQTT_PUBLISH_INTERVAL_MS = 60000;
@@ -173,7 +182,7 @@ constexpr uint16_t STANDBY_HEADER_Y = 20;
 constexpr uint16_t STANDBY_WEATHER_Y = 20;
 constexpr uint16_t STANDBY_WEATHER_H = 360;
 constexpr uint16_t STANDBY_ENERGY_Y = STANDBY_WEATHER_Y + STANDBY_WEATHER_H + 8;
-constexpr uint16_t STANDBY_ENERGY_H = DISPLAY_HEIGHT - STANDBY_ENERGY_Y - 6;
+constexpr uint16_t STANDBY_ENERGY_H = DISPLAY_HEIGHT - STANDBY_ENERGY_Y - 34; // footer strip below: last-updated + battery
 constexpr uint16_t STANDBY_ENERGY_NODE_RADIUS = 60;
 constexpr uint16_t STANDBY_ENERGY_SOLAR_OFFSET_Y = 94;
 constexpr uint16_t STANDBY_ENERGY_SIDE_NODE_OFFSET_X = 88;

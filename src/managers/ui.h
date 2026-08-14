@@ -12,3 +12,7 @@ struct UITaskArgs {
 };
 
 void ui_task(void* arg);
+
+// Small partial-update indicator drawn during a wake-from-sleep boot while the
+// panel still shows the frozen standby screen (called from setup, pre ui_task)
+void ui_draw_wake_glyph(FASTEPD* epaper);

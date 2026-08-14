@@ -132,6 +132,14 @@ void launch_beacon() {
     nimble_port_freertos_init(beacon_host_task);
 }
 
+void beacon_stop() {
+    if (strcmp(g_beacon_status, "advertising") != 0) {
+        return;
+    }
+    ble_gap_adv_stop();
+    g_beacon_status = "off";
+}
+
 const char* beacon_status() {
     return g_beacon_status;
 }

@@ -449,8 +449,14 @@ void launch_wifi(Configuration* config, EntityStore* store) {
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
             ESP_LOGI(TAG, "associated (authmode=%d)", static_cast<int>(info.wifi_sta_connected.authmode));
             break;
-        case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        case ARDUINO_EVENT_WIFI_STA_GOT_IP: {
             ESP_LOGI(TAG, "obtained IP address");
+            static bool sntp_started = false;
+            if (!sntp_started) {
+                sntp_started = true;
+                configTzTime(TIME_TZ, "pool.ntp.org"); // standby last-updated clock
+            }
+        }
             g_wifi.consecutive_disconnects = 0;
             g_wifi.consecutive_auth_fails = 0;
             g_wifi.deep_resets_since_connect = 0;

@@ -1271,7 +1271,45 @@ bool store_get_wifi_password_snapshot(EntityStore* store, WifiPasswordSnapshot* 
 void store_note_interaction(EntityStore* store, uint32_t now_ms) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     store->last_interaction_ms = now_ms;
+    store->user_interacted = true;
+    store->wake_to_room_pending = false; // the user took over navigation
     xSemaphoreGive(store->mutex);
+}
+
+void store_notify_ui(EntityStore* store) {
+    notify_ui(store);
+}
+
+bool store_interaction_seen(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool seen = store->user_interacted;
+    xSemaphoreGive(store->mutex);
+    return seen;
+}
+
+bool store_standby_data_fresh(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    const bool fresh = store->standby_weather_seen;
+    xSemaphoreGive(store->mutex);
+    return fresh;
+}
+
+void store_arm_wake_to_room(EntityStore* store, uint32_t deadline_ms) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    store->wake_to_room_pending = true;
+    store->wake_to_room_deadline_ms = deadline_ms;
+    xSemaphoreGive(store->mutex);
+}
+
+bool store_wake_to_room_pending(EntityStore* store) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    if (store->wake_to_room_pending &&
+        static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS) >= store->wake_to_room_deadline_ms) {
+        store->wake_to_room_pending = false; // the device room never arrived; give up quietly
+    }
+    const bool pending = store->wake_to_room_pending;
+    xSemaphoreGive(store->mutex);
+    return pending;
 }
 
 void store_poll_standby_timeout(EntityStore* store, uint32_t now_ms) {
@@ -1315,6 +1353,7 @@ void store_set_standby_weather(EntityStore* store, const char* condition, bool h
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     bool changed = false;
     bool should_notify = false;
+    store->standby_weather_seen = true;
 
     char normalized_condition[MAX_STANDBY_CONDITION_LEN];
     copy_string(normalized_condition, sizeof(normalized_condition), condition);
@@ -1573,10 +1612,24 @@ void store_wait_for_wifi_up(EntityStore* store) {
 
 void store_set_device_room(EntityStore* store, int8_t room_idx) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
-    const bool changed = store->device_room_idx != room_idx;
+    bool changed = store->device_room_idx != room_idx;
     store->device_room_idx = room_idx;
     if (changed) {
         store->rooms_revision++; // the floor/room lists show a location pin
+    }
+
+    // A touch/button wake from standby sleep lands in the device's room once
+    // Bermuda reports it — unless the user has already started navigating
+    if (store->wake_to_room_pending && room_idx >= 0 && room_idx < static_cast<int8_t>(store->room_count) &&
+        store->selected_room == -1 && store->settings_mode == SettingsMode::None && !store->standby_active) {
+        store->wake_to_room_pending = false;
+        store->selected_floor = store->rooms[room_idx].floor_idx;
+        store->selected_room = room_idx;
+        store->floor_list_page = 0;
+        store->room_list_page = 0;
+        store->room_controls_page = 0;
+        store->rooms_revision++;
+        changed = true;
     }
     xSemaphoreGive(store->mutex);
     if (changed) {

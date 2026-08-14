@@ -38,6 +38,12 @@ class DeviceClient:
         resp = self.session.post(f"{self.base_url}/home", timeout=self.timeout)
         resp.raise_for_status()
 
+    def set_power(self, **kwargs: Any) -> dict:
+        """POST /power options: modem_sleep, cpu_mhz, standby_sleep."""
+        resp = self.session.post(f"{self.base_url}/power", json=kwargs, timeout=self.timeout)
+        resp.raise_for_status()
+        return resp.json()
+
     def screenshot(self) -> Image.Image:
         resp = self.session.get(f"{self.base_url}/screenshot", timeout=30.0)
         resp.raise_for_status()

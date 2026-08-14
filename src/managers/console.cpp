@@ -1,9 +1,12 @@
 #include "managers/console.h"
+#include "constants.h"
 #include "managers/beacon.h"
 #include "managers/power.h"
 #include "managers/wifi.h"
 #include "esp_system.h"
 #include <Arduino.h>
+
+static EntityStore* g_console_store = nullptr;
 
 // Line-based command console on USB serial: works when Wi-Fi (and thus the
 // HTTP harness) is down. Commands: wifi | wifi retry | wifi reset | reboot | help
@@ -50,18 +53,34 @@ static void console_dispatch(const char* line) {
         } else {
             Serial.println("[console] sleep test <1..600 seconds>");
         }
+    } else if (strcmp(line, "standby sleep on") == 0) {
+        power_set_standby_sleep(true);
+        Serial.println("[console] standby sleep on");
+    } else if (strcmp(line, "standby sleep off") == 0) {
+        power_set_standby_sleep(false);
+        Serial.println("[console] standby sleep off");
+    } else if (strncmp(line, "standby sleep now", 17) == 0) {
+        // Full orchestrated sleep, gates bypassed (USB testing); optional timer arg
+        uint32_t seconds = STANDBY_SLEEP_TIMER_S;
+        if (line[17] == ' ' && atoi(line + 18) > 0) {
+            seconds = static_cast<uint32_t>(atoi(line + 18));
+        }
+        Serial.printf("[console] standby sleeping now, %lus timer\n", static_cast<unsigned long>(seconds));
+        power_force_standby_sleep(g_console_store, seconds);
     } else if (strncmp(line, "power cpu ", 10) == 0) {
         const uint32_t mhz = static_cast<uint32_t>(atoi(line + 10));
         Serial.printf("[console] idle cpu %lu MHz: %s\n", static_cast<unsigned long>(mhz),
                       power_set_idle_cpu_mhz(mhz) ? "ok" : "invalid (80|160|240)");
     } else if (strcmp(line, "help") == 0) {
-        Serial.println("[console] commands: wifi | wifi retry | wifi reset | beacon | beacon retry | power | power sleep on/off | power cpu N | reboot");
+        Serial.println("[console] commands: wifi | wifi retry | wifi reset | beacon | beacon retry | power | power sleep on/off | power cpu N | "
+                       "sleep test N | standby sleep on/off/now [N] | reboot");
     } else {
         Serial.printf("[console] unknown command '%s' (try help)\n", line);
     }
 }
 
-void console_init() {
+void console_init(EntityStore* store) {
+    g_console_store = store;
     Serial.begin(115200);
 }
 

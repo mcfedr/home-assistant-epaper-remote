@@ -51,6 +51,8 @@ static void mqtt_publish_discovery_sensor(const char* key, const char* name, con
     if (diagnostic) {
         cJSON_AddStringToObject(root, "entity_category", "diagnostic");
     }
+    // The device sleeps between hourly publishes; expiry marks true staleness
+    cJSON_AddNumberToObject(root, "expire_after", 7200);
     mqtt_add_device_block(root);
 
     char topic[96];
@@ -148,6 +150,17 @@ static void mqtt_task(void* arg) {
         mqtt_publish_state(ctx->store);
         vTaskDelay(pdMS_TO_TICKS(MQTT_PUBLISH_INTERVAL_MS));
     }
+}
+
+void mqtt_publish_now(EntityStore* store) {
+    mqtt_publish_state(store);
+}
+
+void mqtt_publish_offline() {
+    if (g_client == nullptr || !g_connected) {
+        return;
+    }
+    esp_mqtt_client_publish(g_client, AVAILABILITY_TOPIC, "offline", 0, 1, 1);
 }
 
 void launch_mqtt(MqttTaskArgs* args) {

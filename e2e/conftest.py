@@ -26,11 +26,20 @@ def device(cfg: TestConfig) -> DeviceClient:
     while True:
         try:
             client.health()
-            return client
+            break
         except Exception:
             if time.monotonic() > deadline:
                 pytest.skip(f"device not reachable at {cfg.device_url}")
             time.sleep(1)
+
+    # A deep-sleeping device is only wakeable physically — synthetic taps
+    # can't fire the hardware interrupt. Keep it awake for the whole run.
+    client.set_power(standby_sleep=False)
+    yield client
+    try:
+        client.set_power(standby_sleep=True)
+    except Exception:
+        pass  # device may be rebooting at teardown; the default re-arms on next boot
 
 
 @pytest.fixture(scope="session")

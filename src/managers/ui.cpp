@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "managers/power.h"
+#include <ctime>
 #include "assets/Montserrat_Regular_16.h"
 #include "assets/Montserrat_Regular_20.h"
 #include "assets/Montserrat_Regular_26.h"
@@ -1152,9 +1153,36 @@ static void ui_draw_energy_node(FASTEPD* epaper,
     }
 }
 
-void ui_draw_standby(FASTEPD* epaper, const StandbySnapshot* snapshot) {
+void ui_draw_standby(FASTEPD* epaper, const StandbySnapshot* snapshot, const BatteryStatus* battery_status) {
     epaper->setTextColor(BBEP_BLACK);
     epaper->fillScreen(ui_white(epaper));
+
+    // Footer: the standby screen is long-lived (the device deep-sleeps behind
+    // it), so staleness and charge must be visible on the image itself
+    {
+        char footer[64];
+        char when[16] = "";
+        time_t now = time(nullptr);
+        if (now > 1600000000) { // clock is synced
+            struct tm tm_now;
+            localtime_r(&now, &tm_now);
+            snprintf(when, sizeof(when), "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
+        }
+        if (when[0] != '\0' && battery_status != nullptr) {
+            snprintf(footer, sizeof(footer), "Updated %s  -  Battery %u%%", when, battery_status->pct);
+        } else if (battery_status != nullptr) {
+            snprintf(footer, sizeof(footer), "Battery %u%%", battery_status->pct);
+        } else if (when[0] != '\0') {
+            snprintf(footer, sizeof(footer), "Updated %s", when);
+        } else {
+            footer[0] = '\0';
+        }
+        if (footer[0] != '\0') {
+            epaper->setFont(Montserrat_Regular_16);
+            BB_RECT rect = get_text_box(epaper, footer);
+            draw_text_at(epaper, (DISPLAY_WIDTH - rect.w) / 2, DISPLAY_HEIGHT - 10, footer);
+        }
+    }
 
     const int16_t card_x = STANDBY_MARGIN;
     const int16_t card_w = DISPLAY_WIDTH - 2 * STANDBY_MARGIN;
@@ -1555,6 +1583,30 @@ void ui_draw_room_controls_header(FASTEPD* epaper, const char* room_name, uint8_
     }
 }
 
+void ui_draw_wake_glyph(FASTEPD* epaper) {
+    epaper->setMode(BB_MODE_1BPP);
+    epaper->fillScreen(ui_white(epaper));
+    epaper->backupPlane(); // previous plane = white, so the partial diff is exactly the dots
+
+    // Three dots in the bottom-right margin, which standby leaves white
+    for (int i = 0; i < 3; i++) {
+        epaper->fillCircle(DISPLAY_WIDTH - 76 + i * 22, DISPLAY_HEIGHT - 28, 6, BBEP_BLACK);
+    }
+    epaper->partialUpdate(false, DISPLAY_WIDTH - 90, DISPLAY_WIDTH - 46);
+}
+
+// Content hash of what standby will render; the timestamp is deliberately
+// excluded so an unchanged hourly refresh skips the redraw flash
+static uint32_t ui_standby_content_hash(const StandbySnapshot* snapshot, uint8_t battery_pct) {
+    uint32_t hash = 2166136261u; // FNV-1a
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(snapshot);
+    for (size_t i = 0; i < sizeof(*snapshot); i++) {
+        hash = (hash ^ bytes[i]) * 16777619u;
+    }
+    hash = (hash ^ battery_pct) * 16777619u;
+    return hash;
+}
+
 void ui_task(void* arg) {
     UITaskArgs* ctx = static_cast<UITaskArgs*>(arg);
     UIState current_state = {};
@@ -1594,7 +1646,25 @@ void ui_task(void* arg) {
                 power_deep_sleep_test(SLEEP_TEST_TIMER_BACKSTOP_S); // does not return
             }
 
+            // Silent refresh boot: the panel keeps its frozen standby image;
+            // nothing may be drawn until the orchestrator ends silent mode
+            if (power_is_silent_boot()) {
+                power_draw_boost_end();
+                xSemaphoreGive(ctx->store->epaper_mutex);
+                continue;
+            }
+
             store_update_ui_state(ctx->store, ctx->screen, &current_state);
+
+            // Wake-from-sleep boot: hold the frozen standby (plus wake glyph)
+            // instead of flashing Boot/FloorList while the device room is
+            // still in flight; errors and real navigation draw normally
+            if (store_wake_to_room_pending(ctx->store) &&
+                (current_state.mode == UiMode::Boot || current_state.mode == UiMode::Blank || current_state.mode == UiMode::FloorList)) {
+                power_draw_boost_end();
+                xSemaphoreGive(ctx->store->epaper_mutex);
+                continue;
+            }
 
             const bool mode_changed = current_state.mode != displayed_state.mode;
             const bool floor_changed = current_state.selected_floor != displayed_state.selected_floor;
@@ -1620,9 +1690,19 @@ void ui_task(void* arg) {
 
             if (current_state.mode == UiMode::Standby && (mode_changed || standby_changed)) {
                 store_get_standby_snapshot(ctx->store, &standby_snapshot);
-                ctx->epaper->setMode(BB_MODE_4BPP);
-                ui_draw_standby(ctx->epaper, &standby_snapshot);
-                ctx->epaper->fullUpdate(CLEAR_FAST, true);
+                BatteryStatus battery;
+                store_get_battery(ctx->store, &battery);
+                const uint32_t hash = ui_standby_content_hash(&standby_snapshot, battery.valid ? battery.pct : 0);
+
+                // After a wake boot the panel still physically shows the last
+                // standby screen; skip the redraw flash if nothing changed
+                const bool panel_holds_standby = power_boot_mode() != PowerBootMode::Normal && displayed_state.mode == UiMode::Blank;
+                if (!panel_holds_standby || hash != power_standby_hash_get()) {
+                    ctx->epaper->setMode(BB_MODE_4BPP);
+                    ui_draw_standby(ctx->epaper, &standby_snapshot, battery.valid ? &battery : nullptr);
+                    ctx->epaper->fullUpdate(CLEAR_FAST, true);
+                    power_standby_hash_set(hash);
+                }
                 display_is_dirty = false;
             } else if (current_state.mode == UiMode::SettingsMenu && (mode_changed || settings_changed)) {
                 ctx->epaper->setMode(BB_MODE_4BPP);
