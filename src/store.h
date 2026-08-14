@@ -209,6 +209,11 @@ struct EntityStore {
 
     int8_t device_room_idx = -1; // room the device is physically in, per Bermuda
 
+    bool battery_valid = false;
+    uint8_t battery_pct = 0;
+    uint16_t battery_mv = 0;
+    int16_t battery_ma = 0; // positive = charging
+
     uint32_t last_interaction_ms = 0;
     bool standby_active = false;
     uint32_t standby_last_refresh_ms = 0;
@@ -308,6 +313,16 @@ void store_wait_for_wifi_up(EntityStore* store);
 void store_get_harness_info(EntityStore* store, HarnessInfoSnapshot* snapshot);
 void store_set_device_room(EntityStore* store, int8_t room_idx);
 int8_t store_get_device_room(EntityStore* store);
+
+struct BatteryStatus {
+    bool valid;
+    uint8_t pct;
+    uint16_t millivolts;
+    int16_t milliamps; // positive = charging
+};
+
+void store_set_battery(EntityStore* store, bool valid, uint8_t pct, uint16_t millivolts, int16_t milliamps);
+void store_get_battery(EntityStore* store, BatteryStatus* out);
 void store_get_harness_entity(EntityStore* store, uint8_t entity_idx, HarnessWidgetEntity* out);
 void store_flush_pending_commands(EntityStore* store);
 EntityRef store_add_entity(EntityStore* store, EntityConfig entity);

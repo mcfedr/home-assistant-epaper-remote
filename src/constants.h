@@ -56,6 +56,10 @@ constexpr uint8_t DISPLAY_FULL_UPDATE_PASSES = 4;
 constexpr uint32_t STANDBY_IDLE_TIMEOUT_MS = 120000;
 constexpr uint32_t STANDBY_REFRESH_INTERVAL_MS = 3600000; // 1 hour
 
+// Battery telemetry
+constexpr uint32_t BATTERY_SAMPLE_INTERVAL_MS = 30000;
+constexpr int16_t BATTERY_CHARGE_IDLE_BAND_MA = 25; // below this magnitude, report idle
+
 // BLE beacon for Bermuda room presence
 constexpr const char* BEACON_NAME = "epaper-remote";
 constexpr uint16_t BEACON_ADV_INTERVAL_MIN_MS = 500;

@@ -1576,6 +1576,34 @@ int8_t store_get_device_room(EntityStore* store) {
     return room_idx;
 }
 
+void store_set_battery(EntityStore* store, bool valid, uint8_t pct, uint16_t millivolts, int16_t milliamps) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    // The settings screen shows percent and charge direction; redraw only when those change
+    const bool was_charging = store->battery_ma > BATTERY_CHARGE_IDLE_BAND_MA;
+    const bool now_charging = milliamps > BATTERY_CHARGE_IDLE_BAND_MA;
+    const bool changed = store->battery_valid != valid || store->battery_pct != pct || was_charging != now_charging;
+    store->battery_valid = valid;
+    store->battery_pct = pct;
+    store->battery_mv = millivolts;
+    store->battery_ma = milliamps;
+    if (changed) {
+        store->settings_revision++;
+    }
+    xSemaphoreGive(store->mutex);
+    if (changed) {
+        notify_ui(store);
+    }
+}
+
+void store_get_battery(EntityStore* store, BatteryStatus* out) {
+    xSemaphoreTake(store->mutex, portMAX_DELAY);
+    out->valid = store->battery_valid;
+    out->pct = store->battery_pct;
+    out->millivolts = store->battery_mv;
+    out->milliamps = store->battery_ma;
+    xSemaphoreGive(store->mutex);
+}
+
 void store_get_harness_info(EntityStore* store, HarnessInfoSnapshot* snapshot) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     snapshot->wifi = store->wifi;

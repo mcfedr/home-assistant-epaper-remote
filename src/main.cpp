@@ -1,6 +1,7 @@
 #include "boards.h"
 #include "config_remote.h"
 #include "constants.h"
+#include "managers/battery.h"
 #include "managers/beacon.h"
 #include "managers/console.h"
 #include "managers/harness.h"
@@ -93,6 +94,7 @@ void setup() {
 void loop() {
     wifi_poll();
     console_poll();
+    battery_poll(&store);
 
     if (millis() > 60000) {
         beacon_mark_boot_healthy();

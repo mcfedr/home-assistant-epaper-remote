@@ -195,6 +195,14 @@ static esp_err_t health_get_handler(httpd_req_t* req) {
     cJSON_AddNumberToObject(root, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     cJSON_AddStringToObject(root, "beacon", beacon_status());
     cJSON_AddStringToObject(root, "reset_reason", reset_reason_name());
+
+    BatteryStatus battery;
+    store_get_battery(harness_ctx->store, &battery);
+    if (battery.valid) {
+        cJSON_AddNumberToObject(root, "battery_pct", battery.pct);
+        cJSON_AddNumberToObject(root, "battery_mv", battery.millivolts);
+        cJSON_AddNumberToObject(root, "battery_ma", battery.milliamps);
+    }
     cJSON_AddStringToObject(root, "wifi", conn_state_name(info.wifi));
     cJSON_AddStringToObject(root, "home_assistant", conn_state_name(info.home_assistant));
     cJSON_AddStringToObject(root, "ip", info.ip_address);

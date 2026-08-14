@@ -13,6 +13,7 @@ constexpr size_t TOUCH_RST = 9;
 constexpr int HOME_BUTTON_PIN = 0; // Front boot button
 constexpr bool HOME_BUTTON_ACTIVE_LOW = true;
 constexpr int DISPLAY_PANEL = BB_PANEL_EPDIY_V7;
+constexpr bool HAS_BQ27220_FUEL_GAUGE = true; // on the touch I2C bus
 #endif
 
 #ifdef TARGET_M5PAPER_S3
@@ -25,4 +26,5 @@ constexpr size_t TOUCH_RST = 0;
 constexpr int HOME_BUTTON_PIN = -1; // No dedicated front home button mapping
 constexpr bool HOME_BUTTON_ACTIVE_LOW = true;
 constexpr int DISPLAY_PANEL = BB_PANEL_M5PAPERS3;
+constexpr bool HAS_BQ27220_FUEL_GAUGE = false; // battery is on an ADC divider (unsupported yet)
 #endif

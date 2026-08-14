@@ -692,7 +692,26 @@ static void ui_draw_settings_header(FASTEPD* epaper, const char* title) {
     epaper->drawLine(0, SETTINGS_HEADER_HEIGHT, DISPLAY_WIDTH, SETTINGS_HEADER_HEIGHT, BBEP_BLACK);
 }
 
-void ui_draw_settings_menu(FASTEPD* epaper) {
+// Battery glyph: outlined body with a nub, filled proportionally to the charge
+static void ui_draw_battery_glyph(FASTEPD* epaper, int16_t x, int16_t y, uint8_t pct, bool charging) {
+    constexpr int16_t body_w = 56;
+    constexpr int16_t body_h = 28;
+    epaper->drawRoundRect(x, y, body_w, body_h, 5, BBEP_BLACK);
+    epaper->drawRoundRect(x + 1, y + 1, body_w - 2, body_h - 2, 4, BBEP_BLACK);
+    epaper->fillRect(x + body_w, y + 8, 5, body_h - 16, BBEP_BLACK);
+
+    const int16_t fill_w = static_cast<int16_t>((body_w - 10) * pct / 100);
+    if (fill_w > 0) {
+        epaper->fillRect(x + 5, y + 5, fill_w, body_h - 10, BBEP_BLACK);
+    }
+    if (charging) { // small bolt to the left of the body
+        epaper->drawLine(x - 10, y + 4, x - 16, y + 16, BBEP_BLACK);
+        epaper->drawLine(x - 16, y + 16, x - 10, y + 16, BBEP_BLACK);
+        epaper->drawLine(x - 10, y + 16, x - 16, y + 26, BBEP_BLACK);
+    }
+}
+
+void ui_draw_settings_menu(FASTEPD* epaper, const BatteryStatus* battery) {
     epaper->setTextColor(BBEP_BLACK);
     ui_draw_settings_header(epaper, "Settings");
 
@@ -711,6 +730,27 @@ void ui_draw_settings_menu(FASTEPD* epaper) {
     draw_text_at(epaper, SETTINGS_STANDBY_TILE_X + 24, SETTINGS_STANDBY_TILE_Y + 68, "Standby Screen");
     epaper->setFont(Montserrat_Regular_16);
     draw_text_at(epaper, SETTINGS_STANDBY_TILE_X + 24, SETTINGS_STANDBY_TILE_Y + 102, "Open now for debug");
+
+    // Battery status card (informational, not tappable)
+    const int16_t battery_y = SETTINGS_STANDBY_TILE_Y + SETTINGS_STANDBY_TILE_H + SETTINGS_TILE_GAP;
+    epaper->fillRoundRect(SETTINGS_TILE_X, battery_y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, ui_band(epaper));
+    epaper->drawRoundRect(SETTINGS_TILE_X, battery_y, SETTINGS_TILE_W, SETTINGS_TILE_H, 20, BBEP_BLACK);
+
+    epaper->setFont(Montserrat_Regular_20);
+    draw_text_at(epaper, SETTINGS_TILE_X + 24, battery_y + 68, "Battery");
+
+    char battery_line[64];
+    if (battery != nullptr && battery->valid) {
+        const bool charging = battery->milliamps > BATTERY_CHARGE_IDLE_BAND_MA;
+        const bool discharging = battery->milliamps < -BATTERY_CHARGE_IDLE_BAND_MA;
+        snprintf(battery_line, sizeof(battery_line), "%u%%  %u.%02u V  %s", battery->pct, battery->millivolts / 1000,
+                 (battery->millivolts % 1000) / 10, charging ? "charging" : (discharging ? "discharging" : "idle"));
+        ui_draw_battery_glyph(epaper, SETTINGS_TILE_X + SETTINGS_TILE_W - 100, battery_y + 40, battery->pct, charging);
+    } else {
+        snprintf(battery_line, sizeof(battery_line), "No battery information");
+    }
+    epaper->setFont(Montserrat_Regular_16);
+    draw_text_at(epaper, SETTINGS_TILE_X + 24, battery_y + 102, battery_line);
 }
 
 static void ui_draw_wifi_network_row(FASTEPD* epaper, int16_t x, int16_t y, int16_t w, const WifiNetwork& network, bool connected) {
@@ -1547,7 +1587,9 @@ void ui_task(void* arg) {
             } else if (current_state.mode == UiMode::SettingsMenu && (mode_changed || settings_changed)) {
                 ctx->epaper->setMode(BB_MODE_4BPP);
                 ctx->epaper->fillScreen(ui_white(ctx->epaper));
-                ui_draw_settings_menu(ctx->epaper);
+                BatteryStatus battery;
+                store_get_battery(ctx->store, &battery);
+                ui_draw_settings_menu(ctx->epaper, &battery);
                 ctx->epaper->fullUpdate(CLEAR_FAST, true);
                 display_is_dirty = false;
             } else if (current_state.mode == UiMode::WifiSettings && (mode_changed || settings_changed)) {
