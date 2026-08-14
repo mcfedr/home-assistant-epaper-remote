@@ -1,6 +1,7 @@
 #include "managers/harness.h"
 #include "managers/beacon.h"
 #include "managers/mqtt.h"
+#include "managers/power.h"
 #include "boards.h"
 #include "constants.h"
 #include "esp_heap_caps.h"
@@ -198,6 +199,10 @@ static esp_err_t health_get_handler(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "mqtt", mqtt_status());
     cJSON_AddStringToObject(root, "reset_reason", reset_reason_name());
 
+    char power[96];
+    power_report(power, sizeof(power));
+    cJSON_AddStringToObject(root, "power", power);
+
     BatteryStatus battery;
     store_get_battery(harness_ctx->store, &battery);
     if (battery.valid) {
@@ -387,6 +392,33 @@ static esp_err_t swipe_post_handler(httpd_req_t* req) {
     return queue_gesture(req, x1, y1, x2, y2, duration_ms);
 }
 
+static esp_err_t power_post_handler(httpd_req_t* req) {
+    cJSON* body = read_json_body(req);
+    if (body == nullptr) {
+        return send_simple_error(req, HTTPD_400_BAD_REQUEST, "invalid JSON body");
+    }
+
+    cJSON* modem_sleep = cJSON_GetObjectItem(body, "modem_sleep");
+    if (cJSON_IsBool(modem_sleep)) {
+        power_set_modem_sleep(cJSON_IsTrue(modem_sleep));
+    }
+    cJSON* cpu = cJSON_GetObjectItem(body, "cpu_mhz");
+    if (cJSON_IsNumber(cpu)) {
+        if (!power_set_idle_cpu_mhz(static_cast<uint32_t>(cpu->valuedouble))) {
+            cJSON_Delete(body);
+            return send_simple_error(req, HTTPD_400_BAD_REQUEST, "cpu_mhz must be 80, 160 or 240");
+        }
+    }
+    cJSON_Delete(body);
+
+    char report[96];
+    power_report(report, sizeof(report));
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "power", report);
+    return send_json(req, root);
+}
+
 static esp_err_t home_post_handler(httpd_req_t* req) {
     // Without this the standby timer can re-fire immediately after going home
     store_note_interaction(harness_ctx->store, millis());
@@ -445,6 +477,7 @@ static void harness_task(void* arg) {
         {.uri = "/tap", .method = HTTP_POST, .handler = tap_post_handler, .user_ctx = nullptr},
         {.uri = "/swipe", .method = HTTP_POST, .handler = swipe_post_handler, .user_ctx = nullptr},
         {.uri = "/home", .method = HTTP_POST, .handler = home_post_handler, .user_ctx = nullptr},
+        {.uri = "/power", .method = HTTP_POST, .handler = power_post_handler, .user_ctx = nullptr},
     };
     for (const httpd_uri_t& route : routes) {
         httpd_register_uri_handler(server, &route);

@@ -1,5 +1,6 @@
 #include "managers/console.h"
 #include "managers/beacon.h"
+#include "managers/power.h"
 #include "managers/wifi.h"
 #include "esp_system.h"
 #include <Arduino.h>
@@ -31,8 +32,22 @@ static void console_dispatch(const char* line) {
         Serial.flush();
         delay(100);
         esp_restart();
+    } else if (strcmp(line, "power") == 0) {
+        char report[96];
+        power_report(report, sizeof(report));
+        Serial.printf("[console] %s\n", report);
+    } else if (strcmp(line, "power sleep on") == 0) {
+        power_set_modem_sleep(true);
+        Serial.println("[console] modem sleep on");
+    } else if (strcmp(line, "power sleep off") == 0) {
+        power_set_modem_sleep(false);
+        Serial.println("[console] modem sleep off");
+    } else if (strncmp(line, "power cpu ", 10) == 0) {
+        const uint32_t mhz = static_cast<uint32_t>(atoi(line + 10));
+        Serial.printf("[console] idle cpu %lu MHz: %s\n", static_cast<unsigned long>(mhz),
+                      power_set_idle_cpu_mhz(mhz) ? "ok" : "invalid (80|160|240)");
     } else if (strcmp(line, "help") == 0) {
-        Serial.println("[console] commands: wifi | wifi retry | wifi reset | beacon | beacon retry | reboot");
+        Serial.println("[console] commands: wifi | wifi retry | wifi reset | beacon | beacon retry | power | power sleep on/off | power cpu N | reboot");
     } else {
         Serial.printf("[console] unknown command '%s' (try help)\n", line);
     }

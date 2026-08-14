@@ -7,6 +7,7 @@
 #include "managers/harness.h"
 #include "managers/home_assistant.h"
 #include "managers/mqtt.h"
+#include "managers/power.h"
 #include "managers/touch.h"
 #include "managers/ui.h"
 #include "managers/wifi.h"
@@ -35,6 +36,7 @@ static MqttTaskArgs mqtt_task_args;
 
 void setup() {
     console_init();
+    power_init();
 
     // BLE beacon for Bermuda room presence. Must initialize before the panel
     // and Wi-Fi come up; guarded so a wedged boot disables it on the next one.

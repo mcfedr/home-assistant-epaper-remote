@@ -1,5 +1,6 @@
 #include "wifi.h"
 #include "config.h"
+#include "managers/power.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -277,7 +278,7 @@ static void wifi_perform_recovery() {
     delay(200);
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
-    WiFi.setSleep(false);
+    power_apply_wifi_sleep();
     WiFi.setTxPower(WIFI_TX_POWER);
     wifi_connect_with_h2e(g_wifi.active_ssid, g_wifi.active_password);
 }
@@ -578,7 +579,7 @@ void launch_wifi(Configuration* config, EntityStore* store) {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect(false, true);
     WiFi.setAutoReconnect(true);
-    WiFi.setSleep(false);
+    power_apply_wifi_sleep();
     WiFi.setTxPower(WIFI_TX_POWER);
 
     wifi_start_connection(boot_ssid, boot_password, use_custom_profile);
