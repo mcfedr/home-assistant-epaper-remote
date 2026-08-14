@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from . import layout
@@ -6,6 +8,7 @@ from .conftest import find_widget, goto_room
 pytestmark = pytest.mark.device
 
 
+@pytest.mark.skipif(not os.environ.get("E2E_COVER_ACTUATE"), reason="physically moves blinds; set E2E_COVER_ACTUATE=1 to run")
 def test_cover_from_device(at_home, ha, cfg):
     """Tap the cover widget's Down then Up controls and verify HA sees movement.
     The blind physically moves; we stop it quickly and restore by reopening."""
