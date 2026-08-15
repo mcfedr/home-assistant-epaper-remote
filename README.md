@@ -5,7 +5,8 @@ e-Ink remote for Home Assistant built with [FastEPD](https://github.com/bitbank2
 ![Preview](./preview.jpg)
 
 It uses the websocket API of Home Assistant, no plugin is required on the server.
-As it stays permanently connected to the Wifi to get updates, the remote only lasts a few hours on battery.
+While in use it stays connected to Wi-Fi for live updates; on battery it deep-sleeps
+behind the standby screen (the e-ink keeps the image at no cost) and wakes on touch.
 
 ## Hardware supported
 
@@ -72,6 +73,44 @@ If these are omitted, firmware will still attempt to discover usable standby sou
 - Hardware home button:
   - Front button support on Lilygo T5 E-Paper S3 Pro (via touch controller key callback)
   - Returns to root home (floor list)
+
+## Power management
+
+The device runs three power regimes: awake (modem sleep + reduced CPU clock, full speed
+during draws), standby (screen drawn, panel rails off), and battery-only deep sleep
+(~µA, the e-ink keeps showing standby). Waking from deep sleep is a full reboot: the
+old standby stays on the panel while booting, three dots acknowledge the touch, and the
+device opens the room it is physically in (via Bermuda BLE presence).
+
+```mermaid
+flowchart TD
+    Boot[Cold boot] --> Awake
+    Awake["Awake — UI active<br/>(Wi-Fi modem sleep, 80 MHz idle, 240 MHz draws)"]
+    Awake -->|2 min idle| Standby["Standby screen drawn<br/>panel rails powered off"]
+    Standby -->|tap| Awake
+    Standby -->|on USB: stays awake| Standby
+    Standby -->|"on battery, 60 s settle"| Entry["Sleep entry<br/>publish telemetry, BLE beacon off,<br/>touch wake armed, Wi-Fi deauth"]
+    Entry --> Sleep["Deep sleep<br/>(standby image stays on the panel)"]
+    Sleep -->|touch / front button| Wake["Reboot: panel untouched,<br/>waking dots, then opens<br/>the room the device is in"]
+    Wake --> Awake
+    Sleep -->|1 h timer| Silent["Silent refresh: reconnect,<br/>fetch weather/energy, publish telemetry,<br/>redraw only if content changed"]
+    Silent -->|still on battery| Entry
+    Silent -->|on USB or user touched| Awake
+```
+
+Safety valves:
+
+- Deep sleep only engages on battery (discharging per the fuel gauge); on USB the device
+  behaves like an always-on remote and stays flashable/testable.
+- A wake-boot streak counter in RTC memory disables sleeping if wake paths crash before
+  proving healthy, so a bug can never boot-loop the device.
+- Runtime kill switch: `standby sleep off` on the serial console or
+  `POST /power {"standby_sleep": false}` on the test harness (the e2e suite does this
+  automatically, since synthetic taps cannot wake sleeping hardware).
+- A sleeping device is offline by design (no Wi-Fi, MQTT, BLE, or harness); its HA
+  sensors keep their last values and expire after two missed hourly publishes. Wake it
+  with a touch, the front button, or by plugging in USB and waiting for the next timer
+  wake.
 
 ## Wi-Fi behavior notes
 
