@@ -10,6 +10,8 @@ enum class PowerBootMode : uint8_t {
 };
 
 void power_init();
+void power_set_epaper(FASTEPD* epaper); // for panel rail shutdown at sleep entry
+void power_rails(bool on);              // console: isolate whether rail shutdown or deep sleep wipes the panel
 PowerBootMode power_boot_mode();
 void power_apply_wifi_sleep(); // re-apply after the Wi-Fi driver is (re)initialized
 void power_wifi_sleep_hold(bool hold); // keep the PHY enabled during large receive bursts

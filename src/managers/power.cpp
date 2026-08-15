@@ -23,6 +23,7 @@ RTC_NOINIT_ATTR static uint8_t g_wake_boot_streak; // wake boots that never prov
 RTC_NOINIT_ATTR static uint32_t g_rtc_standby_hash;
 
 static PowerBootMode g_boot_mode = PowerBootMode::Normal;
+static FASTEPD* g_epaper = nullptr;
 static bool g_silent_boot = false;
 static bool g_standby_sleep = true;
 static bool g_sleep_guard_tripped = false;
@@ -79,6 +80,17 @@ void power_init() {
 
 PowerBootMode power_boot_mode() {
     return g_boot_mode;
+}
+
+void power_set_epaper(FASTEPD* epaper) {
+    g_epaper = epaper;
+}
+
+void power_rails(bool on) {
+    if (g_epaper != nullptr) {
+        const int rc = g_epaper->einkPower(on ? 1 : 0);
+        ESP_LOGI(TAG, "eink rails -> %d (rc=%d)", on ? 1 : 0, rc);
+    }
 }
 
 void power_apply_wifi_sleep() {
@@ -164,6 +176,16 @@ static void power_enter_sleep(uint32_t timer_s) {
     esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_LOW);
     esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(timer_s) * 1000000ULL);
     ESP_LOGI(TAG, "entering deep sleep: wake on touch/button or %lus timer", static_cast<unsigned long>(timer_s));
+
+    // The standby/sleep-test draws already parked the drivers and cut the
+    // panel rails (bKeepOn=false); einkPower(0) is a last resort if they were
+    // somehow left on. deInit() then floats the control lines and puts the
+    // TPS65185 fully asleep so deep-sleep pin isolation can't glitch the
+    // panel — the pattern FastEPD's own low-power clock example uses.
+    if (g_epaper != nullptr) {
+        g_epaper->einkPower(0);
+        g_epaper->deInit();
+    }
 
     // Deauth from the AP first; vanishing mid-session leaves a ghost session
     // that UniFi punishes with AUTH_EXPIRE loops on rejoin.

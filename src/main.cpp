@@ -53,7 +53,13 @@ void setup() {
     epaper.setPanelSize(DISPLAY_HEIGHT, DISPLAY_WIDTH);
     epaper.setRotation(90);
     epaper.setPasses(DISPLAY_PARTIAL_UPDATE_PASSES, DISPLAY_FULL_UPDATE_PASSES);
-    epaper.einkPower(true); // FIXME: Disabling power makes the GT911 unavailable
+    // Silent refresh boots must leave the panel untouched: no rail power-on,
+    // so the sleeping standby image is never exposed to a cold rail-cut.
+    // (The GT911 has its own supply — touch wake works with the rails off.)
+    if (power_boot_mode() != PowerBootMode::SilentRefresh) {
+        epaper.einkPower(true);
+    }
+    power_set_epaper(&epaper);
 
     // Waking from standby sleep: the panel still shows the old standby screen.
     // Acknowledge the touch right away and open the device's room once known.
@@ -112,7 +118,9 @@ void loop() {
     console_poll();
     battery_poll(&store);
 
-    if (millis() > 60000) {
+    // Boot-relative tick, NOT millis(): esp_timer is restored from the RTC on
+    // deep-sleep wake, which would mark every wake boot healthy instantly
+    if (xTaskGetTickCount() * portTICK_PERIOD_MS > 60000) {
         beacon_mark_boot_healthy();
         power_mark_boot_healthy();
     }

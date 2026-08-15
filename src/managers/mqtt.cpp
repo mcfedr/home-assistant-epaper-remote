@@ -38,8 +38,10 @@ static void mqtt_publish_discovery_sensor(const char* key, const char* name, con
     char unique_id[64];
     snprintf(unique_id, sizeof(unique_id), "epaper_remote_%s", key);
     cJSON_AddStringToObject(root, "unique_id", unique_id);
+    // Deliberately no availability_topic: the device deep-sleeps between
+    // hourly publishes and should keep showing its last values in HA;
+    // expire_after marks true staleness instead
     cJSON_AddStringToObject(root, "state_topic", STATE_TOPIC);
-    cJSON_AddStringToObject(root, "availability_topic", AVAILABILITY_TOPIC);
     cJSON_AddStringToObject(root, "value_template", value_template);
     if (device_class != nullptr) {
         cJSON_AddStringToObject(root, "device_class", device_class);

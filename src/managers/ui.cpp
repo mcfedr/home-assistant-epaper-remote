@@ -1589,10 +1589,17 @@ void ui_draw_wake_glyph(FASTEPD* epaper) {
     epaper->backupPlane(); // previous plane = white, so the partial diff is exactly the dots
 
     // Three dots in the bottom-right margin, which standby leaves white
+    constexpr int16_t dot_r = 6;
+    constexpr int16_t dot_gap = 22;
+    const int16_t x_first = DISPLAY_WIDTH - 76;
     for (int i = 0; i < 3; i++) {
-        epaper->fillCircle(DISPLAY_WIDTH - 76 + i * 22, DISPLAY_HEIGHT - 28, 6, BBEP_BLACK);
+        epaper->fillCircle(x_first + i * dot_gap, DISPLAY_HEIGHT - 28, dot_r, BBEP_BLACK);
     }
-    epaper->partialUpdate(false, DISPLAY_WIDTH - 90, DISPLAY_WIDTH - 46);
+    // Native rows run along logical x, reversed (same mapping as the
+    // room-controls partial updates)
+    const int16_t x_min = x_first - dot_r - 1;
+    const int16_t x_max = x_first + 2 * dot_gap + dot_r + 1;
+    epaper->partialUpdate(false, DISPLAY_WIDTH - x_max, DISPLAY_WIDTH - x_min);
 }
 
 // Content hash of what standby will render; the timestamp is deliberately
@@ -1642,7 +1649,7 @@ void ui_task(void* arg) {
 
             if (store_take_sleep_test_request(ctx->store)) {
                 ui_draw_sleep_test(ctx->epaper);
-                ctx->epaper->fullUpdate(CLEAR_FAST, true);
+                ctx->epaper->fullUpdate(CLEAR_FAST, false); // park + rails off so the image survives sleep
                 power_deep_sleep_test(SLEEP_TEST_TIMER_BACKSTOP_S); // does not return
             }
 
@@ -1700,7 +1707,9 @@ void ui_task(void* arg) {
                 if (!panel_holds_standby || hash != power_standby_hash_get()) {
                     ctx->epaper->setMode(BB_MODE_4BPP);
                     ui_draw_standby(ctx->epaper, &standby_snapshot, battery.valid ? &battery : nullptr);
-                    ctx->epaper->fullUpdate(CLEAR_FAST, true);
+                    // bKeepOn=false: park the drivers and cut the panel rails right
+                    // away — a later cold rail-cut (deep sleep) half-erases the ink
+                    ctx->epaper->fullUpdate(CLEAR_FAST, false);
                     power_standby_hash_set(hash);
                 }
                 display_is_dirty = false;

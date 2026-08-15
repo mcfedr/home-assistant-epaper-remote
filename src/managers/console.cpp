@@ -53,6 +53,12 @@ static void console_dispatch(const char* line) {
         } else {
             Serial.println("[console] sleep test <1..600 seconds>");
         }
+    } else if (strcmp(line, "rails off") == 0) {
+        power_rails(false);
+        Serial.println("[console] eink rails off");
+    } else if (strcmp(line, "rails on") == 0) {
+        power_rails(true);
+        Serial.println("[console] eink rails on");
     } else if (strcmp(line, "standby sleep on") == 0) {
         power_set_standby_sleep(true);
         Serial.println("[console] standby sleep on");
