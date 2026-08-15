@@ -296,7 +296,7 @@ bool store_take_sleep_test_request(EntityStore* store);
 void store_notify_ui(EntityStore* store);
 bool store_interaction_seen(EntityStore* store);
 bool store_standby_data_fresh(EntityStore* store);
-void store_arm_wake_to_room(EntityStore* store, uint32_t deadline_ms);
+void store_arm_wake_to_room(EntityStore* store);
 bool store_wake_to_room_pending(EntityStore* store);
 bool store_shift_wifi_list_page(EntityStore* store, int8_t delta);
 bool store_set_wifi_password_symbols(EntityStore* store, bool symbols);

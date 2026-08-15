@@ -45,20 +45,6 @@ static void console_dispatch(const char* line) {
     } else if (strcmp(line, "power sleep off") == 0) {
         power_set_modem_sleep(false);
         Serial.println("[console] modem sleep off");
-    } else if (strncmp(line, "sleep test ", 11) == 0) {
-        const uint32_t seconds = static_cast<uint32_t>(atoi(line + 11));
-        if (seconds > 0 && seconds <= 600) {
-            Serial.printf("[console] deep sleeping, wake: touch / button / %lus timer\n", static_cast<unsigned long>(seconds));
-            power_deep_sleep_test(seconds);
-        } else {
-            Serial.println("[console] sleep test <1..600 seconds>");
-        }
-    } else if (strcmp(line, "rails off") == 0) {
-        power_rails(false);
-        Serial.println("[console] eink rails off");
-    } else if (strcmp(line, "rails on") == 0) {
-        power_rails(true);
-        Serial.println("[console] eink rails on");
     } else if (strcmp(line, "standby sleep on") == 0) {
         power_set_standby_sleep(true);
         Serial.println("[console] standby sleep on");
@@ -79,7 +65,7 @@ static void console_dispatch(const char* line) {
                       power_set_idle_cpu_mhz(mhz) ? "ok" : "invalid (80|160|240)");
     } else if (strcmp(line, "help") == 0) {
         Serial.println("[console] commands: wifi | wifi retry | wifi reset | beacon | beacon retry | power | power sleep on/off | power cpu N | "
-                       "sleep test N | standby sleep on/off/now [N] | reboot");
+                       "standby sleep on/off/now [N] | reboot");
     } else {
         Serial.printf("[console] unknown command '%s' (try help)\n", line);
     }

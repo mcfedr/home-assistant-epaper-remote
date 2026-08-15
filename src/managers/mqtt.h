@@ -8,6 +8,5 @@ struct MqttTaskArgs {
 };
 
 void launch_mqtt(MqttTaskArgs* args);
-const char* mqtt_status();                   // "off" | "connecting" | "connected" | "error"
-void mqtt_publish_now(EntityStore* store);   // immediate state publish (pre-sleep telemetry)
-void mqtt_publish_offline();                 // retained offline before a clean sleep (no last-will fires)
+const char* mqtt_status();                 // "off" | "connecting" | "connected" | "error"
+void mqtt_publish_now(EntityStore* store); // immediate state publish (pre-sleep telemetry)

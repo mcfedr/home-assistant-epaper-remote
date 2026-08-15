@@ -14,6 +14,7 @@
 #include "screen.h"
 #include "store.h"
 #include "ui_state.h"
+#include "uptime.h"
 #include "widgets/Slider.h"
 #include <Arduino.h>
 #include <FastEPD.h>
@@ -64,7 +65,7 @@ void setup() {
     // Waking from standby sleep: the panel still shows the old standby screen.
     // Acknowledge the touch right away and open the device's room once known.
     if (power_boot_mode() == PowerBootMode::WakeToRoom) {
-        store_arm_wake_to_room(&store, millis() + WAKE_TO_ROOM_WINDOW_MS);
+        store_arm_wake_to_room(&store);
         ui_draw_wake_glyph(&epaper);
     }
 
@@ -118,9 +119,9 @@ void loop() {
     console_poll();
     battery_poll(&store);
 
-    // Boot-relative tick, NOT millis(): esp_timer is restored from the RTC on
-    // deep-sleep wake, which would mark every wake boot healthy instantly
-    if (xTaskGetTickCount() * portTICK_PERIOD_MS > 60000) {
+    static bool boot_marked_healthy = false;
+    if (!boot_marked_healthy && since_boot_ms() > 60000) {
+        boot_marked_healthy = true;
         beacon_mark_boot_healthy();
         power_mark_boot_healthy();
     }

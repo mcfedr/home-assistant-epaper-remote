@@ -765,25 +765,21 @@ void ui_draw_settings_menu(FASTEPD* epaper, const BatteryStatus* battery) {
     draw_text_at(epaper, SETTINGS_TILE_X + 24, SETTINGS_SLEEP_TILE_Y + 102, sleep_line);
 }
 
+static void ui_draw_centered_text(FASTEPD* epaper, int16_t center_x, int16_t baseline_y, const char* text, bool reinforce = false);
+
 static void ui_draw_sleep_test(FASTEPD* epaper) {
     epaper->setMode(BB_MODE_4BPP);
     epaper->fillScreen(ui_white(epaper));
     epaper->setTextColor(BBEP_BLACK);
 
-    static const char* const lines[] = {"Sleeping...", "Touch me to wake", nullptr};
     epaper->setFont(Montserrat_Regular_26);
-    int16_t cursor_y = DISPLAY_HEIGHT / 2 - 60;
-    for (size_t i = 0; lines[i] != nullptr; ++i) {
-        BB_RECT rect = get_text_box(epaper, lines[i]);
-        draw_text_at(epaper, (DISPLAY_WIDTH - rect.w) / 2, cursor_y, lines[i]);
-        cursor_y += rect.h + 30;
-    }
+    ui_draw_centered_text(epaper, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 60, "Sleeping...");
+    ui_draw_centered_text(epaper, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 + 10, "Touch me to wake");
 
     epaper->setFont(Montserrat_Regular_16);
     char backstop_line[48];
     snprintf(backstop_line, sizeof(backstop_line), "Auto-wake in %lus", static_cast<unsigned long>(SLEEP_TEST_TIMER_BACKSTOP_S));
-    BB_RECT rect = get_text_box(epaper, backstop_line);
-    draw_text_at(epaper, (DISPLAY_WIDTH - rect.w) / 2, DISPLAY_HEIGHT - 60, backstop_line);
+    ui_draw_centered_text(epaper, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT - 60, backstop_line);
 }
 
 static void ui_draw_wifi_network_row(FASTEPD* epaper, int16_t x, int16_t y, int16_t w, const WifiNetwork& network, bool connected) {
@@ -1047,7 +1043,7 @@ static const uint8_t* ui_weather_icon_for_condition(const char* condition) {
     return weather_cloudy;
 }
 
-static void ui_draw_centered_text(FASTEPD* epaper, int16_t center_x, int16_t baseline_y, const char* text, bool reinforce = false) {
+static void ui_draw_centered_text(FASTEPD* epaper, int16_t center_x, int16_t baseline_y, const char* text, bool reinforce) {
     BB_RECT rect = get_text_box(epaper, text);
     draw_text_at(epaper, center_x - rect.w / 2, baseline_y, text, reinforce);
 }
@@ -1161,26 +1157,19 @@ void ui_draw_standby(FASTEPD* epaper, const StandbySnapshot* snapshot, const Bat
     // it), so staleness and charge must be visible on the image itself
     {
         char footer[64];
-        char when[16] = "";
+        size_t len = 0;
         time_t now = time(nullptr);
         if (now > 1600000000) { // clock is synced
             struct tm tm_now;
             localtime_r(&now, &tm_now);
-            snprintf(when, sizeof(when), "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
+            len += snprintf(footer + len, sizeof(footer) - len, "Updated %02d:%02d", tm_now.tm_hour, tm_now.tm_min);
         }
-        if (when[0] != '\0' && battery_status != nullptr) {
-            snprintf(footer, sizeof(footer), "Updated %s  -  Battery %u%%", when, battery_status->pct);
-        } else if (battery_status != nullptr) {
-            snprintf(footer, sizeof(footer), "Battery %u%%", battery_status->pct);
-        } else if (when[0] != '\0') {
-            snprintf(footer, sizeof(footer), "Updated %s", when);
-        } else {
-            footer[0] = '\0';
+        if (battery_status != nullptr) {
+            len += snprintf(footer + len, sizeof(footer) - len, "%sBattery %u%%", len > 0 ? "  -  " : "", battery_status->pct);
         }
-        if (footer[0] != '\0') {
+        if (len > 0) {
             epaper->setFont(Montserrat_Regular_16);
-            BB_RECT rect = get_text_box(epaper, footer);
-            draw_text_at(epaper, (DISPLAY_WIDTH - rect.w) / 2, DISPLAY_HEIGHT - 10, footer);
+            ui_draw_centered_text(epaper, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT - 10, footer);
         }
     }
 
@@ -1604,13 +1593,13 @@ void ui_draw_wake_glyph(FASTEPD* epaper) {
 
 // Content hash of what standby will render; the timestamp is deliberately
 // excluded so an unchanged hourly refresh skips the redraw flash
-static uint32_t ui_standby_content_hash(const StandbySnapshot* snapshot, uint8_t battery_pct) {
+static uint32_t ui_standby_content_hash(const StandbySnapshot* snapshot, const BatteryStatus* battery) {
     uint32_t hash = 2166136261u; // FNV-1a
     const uint8_t* bytes = reinterpret_cast<const uint8_t*>(snapshot);
     for (size_t i = 0; i < sizeof(*snapshot); i++) {
         hash = (hash ^ bytes[i]) * 16777619u;
     }
-    hash = (hash ^ battery_pct) * 16777619u;
+    hash = (hash ^ (battery != nullptr ? battery->pct : 0)) * 16777619u;
     return hash;
 }
 
@@ -1650,7 +1639,7 @@ void ui_task(void* arg) {
             if (store_take_sleep_test_request(ctx->store)) {
                 ui_draw_sleep_test(ctx->epaper);
                 ctx->epaper->fullUpdate(CLEAR_FAST, false); // park + rails off so the image survives sleep
-                power_deep_sleep_test(SLEEP_TEST_TIMER_BACKSTOP_S); // does not return
+                power_force_standby_sleep(ctx->store, SLEEP_TEST_TIMER_BACKSTOP_S); // does not return
             }
 
             // Silent refresh boot: the panel keeps its frozen standby image;
@@ -1666,7 +1655,7 @@ void ui_task(void* arg) {
             // Wake-from-sleep boot: hold the frozen standby (plus wake glyph)
             // instead of flashing Boot/FloorList while the device room is
             // still in flight; errors and real navigation draw normally
-            if (store_wake_to_room_pending(ctx->store) &&
+            if (power_boot_mode() == PowerBootMode::WakeToRoom && store_wake_to_room_pending(ctx->store) &&
                 (current_state.mode == UiMode::Boot || current_state.mode == UiMode::Blank || current_state.mode == UiMode::FloorList)) {
                 power_draw_boost_end();
                 xSemaphoreGive(ctx->store->epaper_mutex);
@@ -1699,14 +1688,15 @@ void ui_task(void* arg) {
                 store_get_standby_snapshot(ctx->store, &standby_snapshot);
                 BatteryStatus battery;
                 store_get_battery(ctx->store, &battery);
-                const uint32_t hash = ui_standby_content_hash(&standby_snapshot, battery.valid ? battery.pct : 0);
+                const BatteryStatus* battery_ptr = battery.valid ? &battery : nullptr;
+                const uint32_t hash = ui_standby_content_hash(&standby_snapshot, battery_ptr);
 
                 // After a wake boot the panel still physically shows the last
                 // standby screen; skip the redraw flash if nothing changed
                 const bool panel_holds_standby = power_boot_mode() != PowerBootMode::Normal && displayed_state.mode == UiMode::Blank;
                 if (!panel_holds_standby || hash != power_standby_hash_get()) {
                     ctx->epaper->setMode(BB_MODE_4BPP);
-                    ui_draw_standby(ctx->epaper, &standby_snapshot, battery.valid ? &battery : nullptr);
+                    ui_draw_standby(ctx->epaper, &standby_snapshot, battery_ptr);
                     // bKeepOn=false: park the drivers and cut the panel rails right
                     // away — a later cold rail-cut (deep sleep) half-erases the ink
                     ctx->epaper->fullUpdate(CLEAR_FAST, false);

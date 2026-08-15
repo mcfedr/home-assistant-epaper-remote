@@ -610,6 +610,13 @@ void wifi_debug_report(char* out, size_t out_len) {
              pause_left > 0 ? pause_left : 0, static_cast<unsigned long>(g_wifi_auto_restart_count));
 }
 
+// Deauth so the AP drops the session; vanishing mid-session leaves a ghost
+// session that UniFi punishes with AUTH_EXPIRE loops on rejoin.
+void wifi_deauth() {
+    WiFi.disconnect(true);
+    delay(100);
+}
+
 void wifi_force_recovery() {
     g_wifi.reconnect_pause_until_ms = 0;
     g_wifi.recovery_requested = true;
@@ -652,8 +659,7 @@ void wifi_poll() {
         g_wifi_auto_restart_count++;
         ESP_LOGE(TAG, "Wi-Fi unrecoverable after resets and backoff; restarting device (%lu/%lu)",
                  static_cast<unsigned long>(g_wifi_auto_restart_count), static_cast<unsigned long>(WIFI_MAX_AUTO_RESTARTS));
-        WiFi.disconnect(true); // deauth so the AP drops the session; a ghost session earns AUTH_EXPIRE throttling on rejoin
-        delay(100);
+        wifi_deauth();
         esp_restart();
     }
 

@@ -2,6 +2,7 @@
 #include "managers/beacon.h"
 #include "managers/mqtt.h"
 #include "managers/touch.h"
+#include "managers/wifi.h"
 #include "boards.h"
 #include "constants.h"
 #include "esp_attr.h"
@@ -10,6 +11,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <cstdio>
+#include <cstring>
 
 static const char* TAG = "power";
 
@@ -86,15 +88,8 @@ void power_set_epaper(FASTEPD* epaper) {
     g_epaper = epaper;
 }
 
-void power_rails(bool on) {
-    if (g_epaper != nullptr) {
-        const int rc = g_epaper->einkPower(on ? 1 : 0);
-        ESP_LOGI(TAG, "eink rails -> %d (rc=%d)", on ? 1 : 0, rc);
-    }
-}
-
-void power_apply_wifi_sleep() {
-    WiFi.setSleep(g_modem_sleep && !g_sleep_hold);
+bool power_apply_wifi_sleep() {
+    return WiFi.setSleep(g_modem_sleep && !g_sleep_hold);
 }
 
 // Modem sleep cycles the PHY on every DTIM beacon, and each re-enable does an
@@ -112,7 +107,7 @@ void power_wifi_sleep_hold(bool hold) {
 
 bool power_set_modem_sleep(bool enabled) {
     g_modem_sleep = enabled;
-    const bool ok = WiFi.setSleep(enabled && !g_sleep_hold);
+    const bool ok = power_apply_wifi_sleep();
     ESP_LOGI(TAG, "modem sleep -> %d (ok=%d)", enabled ? 1 : 0, ok ? 1 : 0);
     return ok;
 }
@@ -187,37 +182,24 @@ static void power_enter_sleep(uint32_t timer_s) {
         g_epaper->deInit();
     }
 
-    // Deauth from the AP first; vanishing mid-session leaves a ghost session
-    // that UniFi punishes with AUTH_EXPIRE loops on rejoin.
-    WiFi.disconnect(true);
-    delay(100);
+    wifi_deauth();
 
     Serial.flush();
     delay(50);
     esp_deep_sleep_start();
 }
 
-void power_deep_sleep_test(uint32_t timer_backstop_s) {
-    g_slept_from_standby = 0; // test wake boots like a cold start
-    power_enter_sleep(timer_backstop_s);
-}
-
-// Full standby sleep: last telemetry, explicit MQTT offline (a clean stop
-// doesn't fire the last-will), advertising off, then the shared sleep entry
-static void power_enter_standby_sleep(EntityStore* store, uint32_t timer_s) {
-    ESP_LOGI(TAG, "standby sleep: publishing final telemetry and going offline");
+// Full standby sleep: last telemetry, advertising off, then the shared sleep
+// entry. The next boot routes by wake cause (touch/button -> wake-to-room,
+// timer -> silent refresh).
+void power_force_standby_sleep(EntityStore* store, uint32_t timer_s) {
+    ESP_LOGI(TAG, "standby sleep: publishing final telemetry");
     mqtt_publish_now(store);
-    delay(200);
-    mqtt_publish_offline();
-    delay(200);
+    delay(200); // let the publish leave the socket before deauth
     beacon_stop();
     g_slept_from_standby = 1;
     g_wake_boot_streak = 0; // reaching a clean sleep entry proves the boot healthy
     power_enter_sleep(timer_s);
-}
-
-void power_force_standby_sleep(EntityStore* store, uint32_t timer_s) {
-    power_enter_standby_sleep(store, timer_s);
 }
 
 const char* power_wake_cause() {
@@ -233,10 +215,9 @@ const char* power_wake_cause() {
     }
 }
 
-bool power_set_standby_sleep(bool enabled) {
+void power_set_standby_sleep(bool enabled) {
     g_standby_sleep = enabled;
     ESP_LOGI(TAG, "standby sleep -> %d", enabled ? 1 : 0);
-    return true;
 }
 
 bool power_standby_sleep_enabled() {
@@ -252,7 +233,7 @@ bool power_is_silent_boot() {
 }
 
 void power_mark_boot_healthy() {
-    if (g_wake_boot_streak != 0 && !g_sleep_guard_tripped) {
+    if (!g_sleep_guard_tripped) {
         g_wake_boot_streak = 0;
     }
 }
@@ -271,6 +252,23 @@ static bool power_on_battery(EntityStore* store) {
     BatteryStatus battery;
     store_get_battery(store, &battery);
     return battery.valid && battery.milliamps < -BATTERY_CHARGE_IDLE_BAND_MA;
+}
+
+// nullptr when sleep may proceed; otherwise the inhibit reason for /health
+static const char* power_sleep_gate(EntityStore* store) {
+    if (!g_standby_sleep) {
+        return "disabled";
+    }
+    if (g_sleep_guard_tripped) {
+        return "guard";
+    }
+    if (!store_is_standby_active(store)) {
+        return "awake";
+    }
+    if (!power_on_battery(store)) {
+        return "usb";
+    }
+    return nullptr;
 }
 
 // Silent refresh cycle: standby data is refreshed with the panel untouched,
@@ -295,16 +293,23 @@ static void power_silent_refresh_poll(EntityStore* store) {
     }
 
     g_silent_boot = false;
-    if (store_is_standby_active(store)) {
-        if (power_on_battery(store) && g_standby_sleep && !g_sleep_guard_tripped) {
-            power_enter_standby_sleep(store, STANDBY_SLEEP_TIMER_S); // does not return
-        }
-        ESP_LOGI(TAG, "silent refresh done but sleep inhibited; staying awake");
+    if (power_sleep_gate(store) == nullptr) {
+        power_force_standby_sleep(store, STANDBY_SLEEP_TIMER_S); // does not return
     }
+    ESP_LOGI(TAG, "silent refresh done but sleep inhibited; staying awake");
     store_notify_ui(store); // wake the UI out of suppression
 }
 
 void power_standby_sleep_poll(EntityStore* store) {
+    // The gate's inputs change on the order of seconds; no need to lock the
+    // store on every 25ms loop tick
+    static uint32_t last_poll = 0;
+    const uint32_t now = millis();
+    if (now - last_poll < 500) {
+        return;
+    }
+    last_poll = now;
+
     if (g_silent_boot) {
         // User interaction during the refresh window deactivates standby and
         // exits silent mode below via the standby check in the refresh poll —
@@ -320,31 +325,22 @@ void power_standby_sleep_poll(EntityStore* store) {
     }
 
     static uint32_t standby_since = 0;
-    const uint32_t now = millis();
-
-    if (!g_standby_sleep) {
-        g_sleep_inhibit = "disabled";
-    } else if (g_sleep_guard_tripped) {
-        g_sleep_inhibit = "guard";
-    } else if (!store_is_standby_active(store)) {
-        g_sleep_inhibit = "awake";
-        standby_since = 0;
+    const char* inhibit = power_sleep_gate(store);
+    if (inhibit != nullptr) {
+        g_sleep_inhibit = inhibit;
+        if (strcmp(inhibit, "awake") == 0) {
+            standby_since = 0; // settle restarts when standby next appears
+        }
         return;
-    } else if (!power_on_battery(store)) {
-        g_sleep_inhibit = "usb";
-    } else {
-        if (standby_since == 0) {
-            standby_since = now;
-        }
-        if (now - standby_since < STANDBY_SLEEP_SETTLE_MS) {
-            g_sleep_inhibit = "settling";
-        } else {
-            g_sleep_inhibit = "none";
-            power_enter_standby_sleep(store, STANDBY_SLEEP_TIMER_S); // does not return
-        }
     }
 
     if (standby_since == 0) {
         standby_since = now;
     }
+    if (now - standby_since < STANDBY_SLEEP_SETTLE_MS) {
+        g_sleep_inhibit = "settling";
+        return;
+    }
+    g_sleep_inhibit = "none";
+    power_force_standby_sleep(store, STANDBY_SLEEP_TIMER_S); // does not return
 }

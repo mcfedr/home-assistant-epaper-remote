@@ -1,6 +1,6 @@
 #include "store.h"
 #include "boards.h"
-#include "esp_timer.h"
+#include "uptime.h"
 #include "climate_value.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -275,10 +275,7 @@ void store_init(EntityStore* store) {
     store->mutex = xSemaphoreCreateMutex();
     store->epaper_mutex = xSemaphoreCreateMutex();
     store->event_group = xEventGroupCreate();
-    // Same clock base as millis(): esp_timer is restored from the RTC after a
-    // deep-sleep wake, while the FreeRTOS tick restarts at zero — mixing them
-    // made the standby idle timeout fire instantly on wake boots
-    store->last_interaction_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    store->last_interaction_ms = uptime_ms(); // same clock base as the millis() the pollers pass in
     store->standby_last_refresh_ms = store->last_interaction_ms;
 }
 
@@ -1298,16 +1295,16 @@ bool store_standby_data_fresh(EntityStore* store) {
     return fresh;
 }
 
-void store_arm_wake_to_room(EntityStore* store, uint32_t deadline_ms) {
+void store_arm_wake_to_room(EntityStore* store) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
     store->wake_to_room_pending = true;
-    store->wake_to_room_deadline_ms = deadline_ms;
+    store->wake_to_room_deadline_ms = uptime_ms() + WAKE_TO_ROOM_WINDOW_MS;
     xSemaphoreGive(store->mutex);
 }
 
 bool store_wake_to_room_pending(EntityStore* store) {
     xSemaphoreTake(store->mutex, portMAX_DELAY);
-    if (store->wake_to_room_pending && static_cast<uint32_t>(esp_timer_get_time() / 1000) >= store->wake_to_room_deadline_ms) {
+    if (store->wake_to_room_pending && uptime_ms() >= store->wake_to_room_deadline_ms) {
         store->wake_to_room_pending = false; // the device room never arrived; give up quietly
     }
     const bool pending = store->wake_to_room_pending;
